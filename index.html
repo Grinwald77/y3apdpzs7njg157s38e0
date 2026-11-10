@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
+<link rel="icon" id="fav" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23999'/%3E%3C/svg%3E">
 <title>BTC · риск и сделки</title>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -80,8 +81,16 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 let S=null, PW='', timer=null;
 try{PW=localStorage.getItem('pw')||'';}catch(e){}
 
-let KEY='', INFO=null, INFO_AT=0, IV='4h';
-try{IV=localStorage.getItem('iv')||'4h';}catch(e){}
+let KEY='', INFO=null, INFO_AT=0, IV='4h', EMA='200', LAST_SIG=null;
+try{IV=localStorage.getItem('iv')||'4h';EMA=localStorage.getItem('ema')||'200';}catch(e){}
+// значок вкладки: зелёный — есть сигнал, красный — нет
+function setFav(color){$('fav').href="data:image/svg+xml,"+encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='${color}'/></svg>`);}
+// короткий звонкий сигнал (похож на системный «Tink»)
+let AC=null;
+function tink(){try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();const t=AC.currentTime;
+  [0,0.18].forEach(d=>{const o=AC.createOscillator(),g=AC.createGain();o.type='sine';o.frequency.value=2600;
+    g.gain.setValueAtTime(0.0001,t+d);g.gain.exponentialRampToValueAtTime(0.35,t+d+0.005);g.gain.exponentialRampToValueAtTime(0.0001,t+d+0.12);
+    o.connect(g).connect(AC.destination);o.start(t+d);o.stop(t+d+0.15);});}catch(e){}}
 async function api(path,body){
   const r=await fetch(WORKER_URL+path,{method:'POST',headers:{Authorization:'Bearer '+PW,'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   const j=await r.json().catch(()=>({ok:false,error:'нет ответа от Worker ('+r.status+')'}));
@@ -105,10 +114,10 @@ const send=q=>q.ws?wsOne(q):bx(q);
 const bad=r=>r.status===0||r.status>=400;
 const bmsg=r=>(r.body&&r.body.msg)||JSON.stringify(r.body).slice(0,200);
 async function gather(){
-  const r=await api('/api/reads',{interval:IV});if(!r.ok)throw new Error(r.error);KEY=r.apiKey;
+  const r=await api('/api/reads',{interval:IV,ema:EMA});if(!r.ok)throw new Error(r.error);KEY=r.apiKey;
   const pub=u=>bx({method:'GET',url:u});
   if(!INFO||Date.now()-INFO_AT>6*36e5){const e=await pub(r.pub.exchangeInfo);if(!bad(e)){INFO=e.body.symbols.find(s=>s.symbol===r.symbol);INFO_AT=Date.now();}}
-  const d={symbolInfo:INFO,interval:IV},jobs=[['klines',pub(r.pub.klines)],['premium',pub(r.pub.premium)]];
+  const d={symbolInfo:INFO,interval:IV,ema:EMA},jobs=[['klines',pub(r.pub.klines)],['premium',pub(r.pub.premium)]];
   for(const [k,v] of Object.entries(r.signed))jobs.push([k,Array.isArray(v)?Promise.all(v.map(bx)):bx(v)]);
   for(const [k,p] of jobs)d[k]=await p;
   return d;
@@ -122,7 +131,7 @@ let BUSY=false;
 async function load(strict){
   if(BUSY&&!strict)return;
   try{const d=await gather();const st=await api('/api/state',d);if(!st.ok)throw new Error(st.error);S=st;
-    for(const q of S.actions||[])await send(q);render();}
+    for(const q of S.actions||[])await send(q);render();notify();}
   catch(e){if(strict)throw e;$('err').style.display='block';$('err').textContent='Ошибка обновления: '+e.message;}
 }
 const lock=on=>{BUSY=on;document.querySelectorAll('#app button').forEach(b=>b.disabled=on);};
@@ -158,6 +167,14 @@ async function closePos(){
   lock(false);load();
 }
 
+function notify(){
+  const g=S.signal||{},side=g.side||null;
+  setFav(side?'#1F9D55':'#C0392B');
+  document.title=(S.price?f(S.price,1)+' · ':'')+'BTC '+IV.toUpperCase()+' · '+(side||'нет сигнала');
+  const key=side?side+g.candle_close_time+IV+EMA:null;
+  if(key&&LAST_SIG!==null&&key!==LAST_SIG)tink();
+  LAST_SIG=key||'';
+}
 function render(){
   const s=S;
   $('mode').textContent=s.mode==='LIVE'?'РЕАЛЬНЫЙ СЧЁТ':'ДЕМО';$('mode').className='badge '+(s.mode==='LIVE'?'live':'demo');
@@ -213,7 +230,10 @@ function render(){
     jr.map(r=>`<tr><td>${t(r.opened_at)}</td><td class="${r.side==='LONG'?'long':'short'}">${r.side}</td><td>${r.qty}</td><td>${f(r.entry,1)}</td><td>${f(r.stop,1)}</td><td>${f(r.tp,1)}</td><td>${usd(r.risk_usd)}</td><td>${r.status==='OPEN'?'открыта':f(r.exit_price,1)}</td><td class="${cls(r.pnl)}">${r.pnl==null?'—':usd(r.pnl)}</td><td class="${cls(r.r)}">${r.r==null?'—':f(r.r,2)}</td></tr>`).join('')}</tbody></table>`:'';
 }
 $('iv').value=IV;$('ivTitle').textContent=IV.toUpperCase();
-$('iv').onchange=()=>{IV=$('iv').value;try{localStorage.setItem('iv',IV);}catch(e){}$('ivTitle').textContent=IV.toUpperCase();$('sig').textContent='Загрузка…';load();};
+$('iv').onchange=()=>{IV=$('iv').value;try{localStorage.setItem('iv',IV);}catch(e){}$('ivTitle').textContent=IV.toUpperCase();$('sig').textContent='Загрузка…';LAST_SIG=null;load();};
+$('ema').value=EMA;
+$('ema').onchange=()=>{EMA=$('ema').value;try{localStorage.setItem('ema',EMA);}catch(e){}$('sig').textContent='Загрузка…';LAST_SIG=null;load();};
+document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();}catch(e){}},{once:true});
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
 if(PW)login();else logout();
 </script>
