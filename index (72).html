@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>BTC 4H · риск и сделки</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#ECEFF2;--card:#F8FAFB;--ink:#16202A;--muted:#5D6B78;--line:#CED6DE;--accent:#1D5C7A;--gain:#1F7A4A;--loss:#B0362F;--warn:#9A6514;--chip:#DFE6EC;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0E151C;--card:#15202A;--ink:#DCE4EB;--muted:#8B9DAD;--line:#273644;--accent:#6FB3D2;--gain:#5CC08A;--loss:#E57B72;--warn:#D9A94E;--chip:#1D2B37;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Manrope,system-ui,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+main{max-width:1150px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:16px}
+h1{font-size:28px;font-weight:800;letter-spacing:-.02em;margin:0}
+.badge{font-weight:800;font-size:12px;letter-spacing:.06em;padding:3px 8px;border-radius:4px;background:var(--chip)}
+.badge.live{background:var(--loss);color:var(--card)}
+.badge.demo{background:var(--warn);color:var(--card)}
+.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em}
+.big{font-size:30px;font-weight:800;line-height:1.1;margin-bottom:6px}
+.long{color:var(--gain)}.short{color:var(--loss)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:8px 0 0}
+dt{color:var(--muted)}dd{margin:0;text-align:right;font-weight:600}
+.alert{border-left:3px solid var(--loss);padding:6px 10px;margin:10px 0 0;font-size:14px}
+.note{border-left:3px solid var(--warn);padding:6px 10px;margin:10px 0 0;font-size:14px;color:var(--muted)}
+.ok{border-left:3px solid var(--gain);padding:6px 10px;margin:10px 0 0;font-size:14px}
+button{font:inherit;font-weight:700;border:0;border-radius:6px;padding:10px 16px;cursor:pointer;margin-top:12px}
+button.go-long{background:var(--gain);color:var(--card)}
+button.go-short{background:var(--loss);color:var(--card)}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.wide{grid-column:1/-1}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:12.5px}
+th:first-child,td:first-child{text-align:left}
+.pos{color:var(--gain);font-weight:700}.neg{color:var(--loss);font-weight:700}
+#err{display:none}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>BTC 4H · риск и сделки</h1>
+  <span id="mode" class="badge">…</span>
+  <span class="muted" id="hdr"></span>
+</header>
+<div id="err" class="card alert" style="margin-bottom:14px"></div>
+<section id="login" class="card" style="max-width:380px;display:none">
+  <h2>Вход</h2>
+  <input id="pw" type="password" autocomplete="current-password" placeholder="Пароль" style="font:inherit;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)">
+  <button class="go-long" id="pwBtn">Войти</button>
+</section>
+<div class="grid" id="app" style="display:none">
+  <section class="card"><h2>Сигнал</h2><div id="sig">Загрузка…</div></section>
+  <section class="card"><h2>План сделки</h2><div id="plan"></div></section>
+  <section class="card"><h2>Позиция</h2><div id="pos"></div></section>
+  <section class="card"><h2>Риск-контроль</h2><div id="lock"></div></section>
+  <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div></section>
+</div>
+</main>
+<script>
+// Адрес вашего Cloudflare Worker (без / в конце)
+const WORKER_URL='https://wohjadjm4gr5m0skzvvp.egal-greenwald.workers.dev';
+const $=id=>document.getElementById(id);
+const f=(x,d=2)=>x==null||!isFinite(x)?'—':Number(x).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const usd=x=>(x<0?'−':'')+'$'+f(Math.abs(x));
+const cls=x=>x>0?'pos':x<0?'neg':'';
+const t=ms=>ms?new Date(ms).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S=null, PW='', timer=null;
+try{PW=localStorage.getItem('pw')||'';}catch(e){}
+
+let KEY='', INFO=null, INFO_AT=0;
+async function api(path,body){
+  const r=await fetch(WORKER_URL+path,{method:'POST',headers:{Authorization:'Bearer '+PW,'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const j=await r.json().catch(()=>({ok:false,error:'нет ответа от Worker ('+r.status+')'}));
+  if(r.status===401||r.status===429){logout(j.error);throw new Error(j.error);}
+  return j;
+}
+// запрос в Binance уходит прямо из браузера; Worker только подписал его
+async function bx(q){
+  try{const r=await fetch(q.url,{method:q.method,headers:q.signed?{'X-MBX-APIKEY':KEY}:{}});
+    const t=await r.text();let b;try{b=JSON.parse(t);}catch(e){b=t.slice(0,300);}return {status:r.status,body:b};}
+  catch(e){return {status:0,body:{msg:'браузер не смог связаться с Binance: '+e.message}};}
+}
+const bad=r=>r.status===0||r.status>=400;
+const bmsg=r=>(r.body&&r.body.msg)||JSON.stringify(r.body).slice(0,200);
+async function gather(){
+  const r=await api('/api/reads');if(!r.ok)throw new Error(r.error);KEY=r.apiKey;
+  const pub=u=>bx({method:'GET',url:u});
+  if(!INFO||Date.now()-INFO_AT>6*36e5){const e=await pub(r.pub.exchangeInfo);if(!bad(e)){INFO=e.body.symbols.find(s=>s.symbol===r.symbol);INFO_AT=Date.now();}}
+  const d={symbolInfo:INFO},jobs=[['klines',pub(r.pub.klines)],['premium',pub(r.pub.premium)]];
+  for(const [k,v] of Object.entries(r.signed))jobs.push([k,Array.isArray(v)?Promise.all(v.map(bx)):bx(v)]);
+  for(const [k,p] of jobs)d[k]=await p;
+  return d;
+}
+function logout(msg){PW='';try{localStorage.removeItem('pw');}catch(e){}clearInterval(timer);
+  $('app').style.display='none';$('login').style.display='block';
+  $('err').style.display=msg?'block':'none';$('err').textContent=msg||'';}
+async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch(e){}
+  try{await load(true);$('login').style.display='none';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);}catch(e){}}
+let BUSY=false;
+async function load(strict){
+  if(BUSY&&!strict)return;
+  try{const d=await gather();const st=await api('/api/state',d);if(!st.ok)throw new Error(st.error);S=st;
+    for(const q of S.actions||[])await bx(q);render();}
+  catch(e){if(strict)throw e;$('err').style.display='block';$('err').textContent='Ошибка обновления: '+e.message;}
+}
+const lock=on=>{BUSY=on;document.querySelectorAll('#app button').forEach(b=>b.disabled=on);};
+async function openTrade(msg){
+  if(!confirm(msg))return;lock(true);let placed=false,prep=null;
+  try{
+    prep=await api('/api/open/prepare',await gather());if(!prep.ok)throw new Error(prep.error);
+    let order=null;
+    for(const q of prep.steps){
+      const r=await bx(q);
+      if(q.check==='oneway'){if(bad(r))throw new Error(bmsg(r));if(r.body.dualSidePosition)throw new Error('включён Hedge Mode — переключите режим позиций на One-way в Binance');continue;}
+      if(bad(r)){if(q.allow&&q.allow.includes(r.body&&r.body.code))continue;throw new Error(bmsg(r));}
+      order=r.body;
+    }
+    placed=true;
+    const x=await api('/api/open/exits',{order});if(!x.ok)throw new Error(x.error);
+    const sr=await bx(x.stopReq);
+    if(bad(sr)){await bx(x.emergency);alert('Стоп не выставился ('+bmsg(sr)+') — позиция сразу закрыта.');}
+    else{const tr=await bx(x.tpReq);
+      alert(`Сделка открыта: вход ${f(x.entry,1)}, стоп ${f(x.stop,1)}, цель ${f(x.tp,1)}, ${x.qty} BTC.`+(bad(tr)?`\n\nТейк-профит не выставился: ${bmsg(tr)}. Цель ${f(x.tp,1)} — следите вручную.`:''));}
+  }catch(e){
+    if(placed&&prep){const r=await bx(prep.emergency);alert('Ошибка после входа: '+e.message+(bad(r)?'\n\nВНИМАНИЕ: позицию закрыть не удалось — закройте вручную на Binance!':'\n\nПозиция закрыта для безопасности.'));}
+    else{await api('/api/open/abort').catch(()=>{});alert('Сделка не открыта: '+e.message);}
+  }
+  lock(false);load();
+}
+async function closePos(){
+  if(!confirm('Закрыть позицию по рынку и снять стоп/тейк?'))return;lock(true);
+  try{const p=await api('/api/close/prepare',{symbolInfo:INFO,amt:S.account&&S.account.pos?S.account.pos.amt:0});if(!p.ok)throw new Error(p.error);
+    for(const q of p.steps){const r=await bx(q);if(q.method==='POST'&&bad(r))throw new Error(bmsg(r));}}
+  catch(e){alert('Ошибка: '+e.message);}
+  lock(false);load();
+}
+
+function render(){
+  const s=S;
+  $('mode').textContent=s.mode==='LIVE'?'РЕАЛЬНЫЙ СЧЁТ':'ДЕМО';$('mode').className='badge '+(s.mode==='LIVE'?'live':'demo');
+  const a=s.account;
+  $('hdr').textContent=`${s.symbol} · плечо ${s.leverage}x · `+(a?`баланс ${usd(a.balance)} (свободно ${usd(a.available)})`:'ключ API не задан')+` · обновлено ${t(s.updated)}`;
+  $('err').style.display=s.error?'block':'none';$('err').textContent=s.error?'Ошибка: '+s.error:'';
+  const g=s.signal;
+  if(g){
+    const left=Math.max(0,s.next_close-Date.now()),hh=Math.floor(left/36e5),mm=Math.floor(left%36e5/6e4);
+    $('sig').innerHTML=`<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
+      <div class="muted">${esc(g.reason)}</div>
+      <dl><dt>Закрытие свечи</dt><dd>${f(g.close,1)}</dd><dt>EMA ${s.rules.ema}</dt><dd>${f(g.ema,1)}</dd>
+      <dt>Канал ${s.rules.donchian} свечей</dt><dd>${f(g.lo,1)} – ${f(g.hi,1)}</dd><dt>ATR 14</dt><dd>${f(g.atr,1)}</dd>
+      <dt>Свеча закрыта</dt><dd>${t(g.candle_close_time)}</dd><dt>Следующая через</dt><dd>${hh} ч ${mm} мин</dd></dl>`;
+  }
+  const p=s.plan;
+  if(p){
+    const can=s.tradable;
+    $('plan').innerHTML=`<dl><dt>Направление</dt><dd class="${p.side==='LONG'?'long':'short'}">${p.side}</dd>
+      <dt>Вход ≈ (марк-цена)</dt><dd>${f(p.price,1)}</dd><dt>Стоп (${s.rules.atr_mult}×ATR)</dt><dd>${f(p.stop,1)}</dd>
+      <dt>Цель (${s.rules.rr}R)</dt><dd>${f(p.tp,1)}</dd><dt>Объём</dt><dd>${p.qty} BTC (${usd(p.notional)})</dd>
+      <dt>Залог при ${s.leverage}x</dt><dd>${usd(p.margin)}</dd><dt>Риск с комиссией</dt><dd class="neg">${usd(p.risk)} · ${f(p.risk_pct,1)}%</dd>
+      <dt>Потенциал</dt><dd class="pos">${usd(p.reward)}</dd><dt>Ликвидация ≈</dt><dd>${p.liq?f(p.liq,1):'нет при этом балансе'}</dd></dl>
+      ${p.notes.map(n=>`<div class="note">${esc(n)}</div>`).join('')}
+      ${can?'':`<div class="alert">Сделка недоступна: ${esc(s.why)}</div>`}
+      <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Открыть ${p.side}</button>`;
+    if(can)$('openBtn').onclick=()=>openTrade(`Открыть ${p.side} ${p.qty} BTC по рынку?\nСтоп ${f(p.stop,1)}, цель ${f(p.tp,1)}, риск ${usd(p.risk)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
+  } else $('plan').innerHTML=`<div class="muted">${esc(s.why||'Ждём сигнала на закрытии 4-часовой свечи.')}</div>`;
+  const ps=a&&a.pos;
+  if(ps){
+    const sl=a.algos.find(x=>x.type==='STOP_MARKET'),tp=a.algos.find(x=>x.type==='TAKE_PROFIT_MARKET');
+    $('pos').innerHTML=`<div class="big ${ps.amt>0?'long':'short'}">${ps.amt>0?'LONG':'SHORT'} ${Math.abs(ps.amt)} BTC</div>
+      <dl><dt>Вход</dt><dd>${f(ps.entry,1)}</dd><dt>Марк-цена</dt><dd>${f(ps.mark,1)}</dd>
+      <dt>Нереализ. P&amp;L</dt><dd class="${cls(ps.upnl)}">${usd(ps.upnl)}</dd>
+      <dt>Стоп на бирже</dt><dd>${sl?f(sl.trigger,1):'<span class="neg">НЕТ</span>'}</dd>
+      <dt>Тейк на бирже</dt><dd>${tp?f(tp.trigger,1):'нет'}</dd><dt>Ликвидация</dt><dd>${ps.liq?f(ps.liq,1):'—'}</dd></dl>
+      ${sl?'':'<div class="alert">На бирже нет стопа — позиция не защищена.</div>'}
+      <button class="ghost" id="closeBtn">Закрыть по рынку</button>`;
+    $('closeBtn').onclick=closePos;
+  } else $('pos').innerHTML='<div class="muted">Открытых позиций нет.</div>';
+  const l=s.lock;
+  if(l){
+    $('lock').innerHTML=(l.locked?`<div class="big short">Блокировка</div><div>${esc(l.reason)}</div><div class="muted">до ${t(l.until)}</div>`
+      :`<div class="big long">Торговля разрешена</div>`)+
+      `<dl><dt>Убытков подряд (неделя)</dt><dd>${l.consec_losses} из ${s.rules.max_consec}</dd>
+       <dt>P&amp;L недели</dt><dd class="${cls(l.week_pnl)}">${usd(l.week_pnl)} · ${f(l.week_pct,1)}%</dd>
+       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Риск на сделку</dt><dd>${s.rules.risk_pct}% (макс. ${s.rules.max_risk_pct}%)</dd></dl>`;
+  }
+  const st=s.stats||{n:0};
+  $('stats').textContent=st.n?`Сделок ${st.n} · прибыльных ${f(st.winrate,0)}% · средний результат ${f(st.avg_r,2)}R · итого ${usd(st.total)} · макс. просадка ${usd(-st.max_dd)}`:'Закрытых сделок пока нет.';
+  const jr=s.journal||[];
+  $('jr').innerHTML=jr.length?`<table><thead><tr><th>Открыта</th><th>Сторона</th><th>Объём</th><th>Вход</th><th>Стоп</th><th>Цель</th><th>Риск</th><th>Выход</th><th>P&amp;L</th><th>R</th></tr></thead><tbody>${
+    jr.map(r=>`<tr><td>${t(r.opened_at)}</td><td class="${r.side==='LONG'?'long':'short'}">${r.side}</td><td>${r.qty}</td><td>${f(r.entry,1)}</td><td>${f(r.stop,1)}</td><td>${f(r.tp,1)}</td><td>${usd(r.risk_usd)}</td><td>${r.status==='OPEN'?'открыта':f(r.exit_price,1)}</td><td class="${cls(r.pnl)}">${r.pnl==null?'—':usd(r.pnl)}</td><td class="${cls(r.r)}">${r.r==null?'—':f(r.r,2)}</td></tr>`).join('')}</tbody></table>`:'';
+}
+$('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
+if(PW)login();else logout();
+</script>
+</body>
+</html>
