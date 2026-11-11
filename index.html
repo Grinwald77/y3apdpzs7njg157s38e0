@@ -75,7 +75,7 @@ th:first-child,td:first-child{text-align:left}
     <div id="histInfo" class="muted"></div></summary><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
     <div class="muted">Прогоняет правило по последним 1 500 свечам выбранного периода и EMA: стоп 1,5 / 2 / 3 ATR, вход по рынку или лимиткой на откате к уровню пробоя. Цель — 2R, комиссия Binance учтена.</div>
-    <button class="ghost" id="btBtn">Запустить тест</button><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
+    <button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
   <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div>
     <button class="ghost" id="jrClear">Очистить журнал</button></section>
 </div>
@@ -183,6 +183,31 @@ async function runBacktest(){
       <div class="muted" style="margin-top:8px">1R — это риск одной сделки. Итого +10R при риске $1 = +$10. Строка с фоном — лучший итог среди вариантов с 5+ сделками. Прошлое не гарантирует будущего: смотрите, устойчив ли результат на разных периодах и EMA.</div>`;
   }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
   b.disabled=false;
+}
+
+// все периоды × все EMA × вход × стоп; сортировка по итогу в R
+async function runAllTests(){
+  const b=$('btAllBtn'),b2=$('btBtn');b.disabled=b2.disabled=true;$('bt').innerHTML='';
+  const rr=(S&&S.rules&&S.rules.rr)||2,rows=[],per=[['1m',1],['15m',15],['30m',30],['1h',60],['2h',120],['4h',240]];
+  try{
+    for(const [iv,min] of per){
+      $('btInfo').textContent=`Загружаю и считаю ${iv.toUpperCase()}…`;
+      const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=1500`);
+      const K=(await r.json()).filter(x=>x[6]<Date.now()),days=(K.at(-1)[6]-K[0][6])/864e5;
+      for(const n of [20,50,100,200])for(const mode of ['market','retest'])for(const m of [1.5,2,3])
+        rows.push({iv,ema:n,mode,m,days,...backtest(K,n,m,mode,rr)});
+      await new Promise(z=>setTimeout(z,0));
+    }
+    rows.sort((a,b)=>(b.n>=10)-(a.n>=10)||b.totalR-a.totalR);
+    const good=rows.filter(x=>x.n>=10&&x.netR>0).length;
+    $('btInfo').textContent=`Проверено ${rows.length} вариантов · в плюсе с комиссией (от 10 сделок): ${good} · цель ${rr}R · сверху лучшие`;
+    const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${x.ema}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${f(x.days,0)}</td><td>${x.n}</td><td>${f(x.win,0)}%</td><td class="${cls(x.grossR)}">${f(x.grossR,2)}</td><td class="${cls(x.netR)}">${f(x.netR,2)}</td><td class="${cls(x.totalR)}">${f(x.totalR,1)}</td><td>${x.maxS}</td><td>${f(x.dd,1)}</td></tr>`;
+    const head=`<thead><tr><th>Период</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Дней</th><th>Сделок</th><th>Прибыльных</th><th>R без ком.</th><th>R с ком.</th><th>Итого R</th><th>Убытков подряд</th><th>Просадка R</th></tr></thead>`;
+    $('bt').innerHTML=`<table>${head}<tbody>${rows.slice(0,20).map(tr).join('')}</tbody></table>
+      <details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows.length} вариантов</summary><table>${head}<tbody>${rows.slice(20).map(tr).join('')}</tbody></table></details>
+      <div class="muted" style="margin-top:8px">Бледные строки — меньше 10 сделок, по ним выводы делать рано. Надёжный признак — когда в плюсе несколько соседних вариантов (тот же период и вход при разных EMA или стопах), а не один случайный.</div>`;
+  }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
+  b.disabled=b2.disabled=false;
 }
 async function clearJournal(){
   if(!confirm('Удалить все закрытые сделки из журнала? Открытая позиция (если есть) останется.'))return;
@@ -332,7 +357,7 @@ $('ema').value=EMA;
 $('ema').onchange=()=>{EMA=$('ema').value;try{localStorage.setItem('ema',EMA);}catch(e){}$('sig').textContent='Загрузка…';LAST_SIG=null;load();history24();};
 document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();}catch(e){}},{once:true});
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
-$('btBtn').onclick=runBacktest;$('jrClear').onclick=clearJournal;
+$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('jrClear').onclick=clearJournal;
 projectLook();
 if(PW)login();else logout();
 </script>
