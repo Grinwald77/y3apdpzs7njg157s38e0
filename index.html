@@ -317,7 +317,7 @@ function render(){
       :`<div class="big long">Торговля разрешена</div>`+(l.disabled?'<div class="muted">Блокировка выключена на демо-счёте, на реальном включится сама</div>':''))+
       `<dl><dt>Убытков подряд (неделя)</dt><dd>${l.consec_losses} из ${s.rules.max_consec}</dd>
        <dt>P&amp;L недели</dt><dd class="${cls(l.week_pnl)}">${usd(l.week_pnl)} · ${f(l.week_pct,1)}%</dd>
-       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Риск на сделку</dt><dd>${s.rules.risk_pct}% (макс. ${s.rules.max_risk_pct}%)</dd></dl>`;
+       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Фоновая проверка</dt><dd>${s.bg?(s.bg.error?'<span class="neg">ошибка</span>':esc(s.bg.source)+', '+t(s.bg.at)):'ещё не запускалась'}</dd><dt>Риск на сделку</dt><dd>${s.rules.risk_pct}% (макс. ${s.rules.max_risk_pct}%)</dd></dl>`;
   }
   const st=s.stats||{n:0};
   $('stats').textContent=st.n?`Сделок ${st.n} · прибыльных ${f(st.winrate,0)}% · средний результат ${f(st.avg_r,2)}R · итого ${usd(st.total)} · макс. просадка ${usd(-st.max_dd)}`:'Закрытых сделок пока нет.';
