@@ -288,24 +288,28 @@ async function openTrade(msg){
   if(!confirm(msg))return;lock(true);let placed=false,prep=null;
   try{
     prep=await api('/api/open/prepare',await gather());if(!prep.ok)throw new Error(prep.error);
-    let order=null;
     for(const q of prep.steps){
       const r=await send(q);
       if(q.check==='oneway'){if(bad(r))throw new Error(bmsg(r));if(r.body.dualSidePosition)throw new Error('включён Hedge Mode — переключите режим позиций на One-way в Binance');continue;}
       if(bad(r)){if(q.allow&&q.allow.includes(r.body&&r.body.code))continue;throw new Error(bmsg(r));}
-      order=r.body;
     }
     placed=true;
-    const x=await api('/api/open/exits',{order});if(!x.ok)throw new Error(x.error);
-    const sr=await send(x.stopReq);
-    if(bad(sr)){await send(x.emergency);alert('Стоп не выставился ('+bmsg(sr)+') — позиция сразу закрыта.');}
-    else{const tr=await send(x.tpReq);
+    const sr=await send(prep.stopReq);
+    if(bad(sr)){await send(prep.cancelReq);await api('/api/open/abort').catch(()=>{});alert('Стоп не выставился ('+bmsg(sr)+') — заявка снята, сделки нет.');}
+    else{const tr=await send(prep.tpReq);
       await api('/api/open/algos',{ids:[sr.body.algoId,bad(tr)?null:tr.body.algoId]});
-      alert(`Сделка открыта: вход ${f(x.entry,1)}, стоп ${f(x.stop,1)}, цель ${f(x.tp,1)}, ${x.qty} BTC.`+(bad(tr)?`\n\nТейк-профит не выставился: ${bmsg(tr)}. Цель ${f(x.tp,1)} — следите вручную.`:''));}
+      const p=prep.plan;
+      alert(`Лимитная заявка ${p.side} ${p.qty} BTC стоит по ${f(p.price,1)} до ${t(p.gtd)}.\nСтоп ${f(p.stop,1)} и цель ${f(p.tp,1)} уже на бирже.`+(bad(tr)?`\n\nТейк-профит не выставился: ${bmsg(tr)}. Цель ${f(p.tp,1)} — следите вручную.`:''));}
   }catch(e){
-    if(placed&&prep){const r=await send(prep.emergency);alert('Ошибка после входа: '+e.message+(bad(r)?'\n\nВНИМАНИЕ: позицию закрыть не удалось — закройте вручную на Binance!':'\n\nПозиция закрыта для безопасности.'));}
-    else{await api('/api/open/abort').catch(()=>{});alert('Сделка не открыта: '+e.message);}
+    if(placed&&prep){const r=await send(prep.cancelReq);await api('/api/open/abort').catch(()=>{});alert('Ошибка после постановки заявки: '+e.message+(bad(r)?'\n\nВНИМАНИЕ: заявку снять не удалось — проверьте ордера на Binance!':'\n\nЗаявка снята.'));}
+    else{await api('/api/open/abort').catch(()=>{});alert('Заявка не поставлена: '+e.message);}
   }
+  lock(false);load();
+}
+async function cancelLimit(){
+  if(!confirm('Снять лимитную заявку вместе со стопом и тейком?'))return;lock(true);
+  try{const p=await api('/api/limit/cancel');if(!p.ok)throw new Error(p.error);for(const q of p.steps)await send(q);}
+  catch(e){alert('Ошибка: '+e.message);}
   lock(false);load();
 }
 async function closePos(){
@@ -351,14 +355,14 @@ function render(){
   if(p){
     const can=s.tradable;
     $('plan').innerHTML=`<dl><dt>Направление</dt><dd class="${p.side==='LONG'?'long':'short'}">${p.side}</dd>
-      <dt>Вход ≈ (марк-цена)</dt><dd>${f(p.price,1)}</dd><dt>Стоп (${s.rules.atr_mult}×ATR)</dt><dd>${f(p.stop,1)}</dd>
+      <dt>Вход — лимитка на уровне пробоя</dt><dd>${f(p.price,1)}</dd><dt>Заявка действует до</dt><dd>${t(p.gtd)}</dd><dt>Стоп (${s.rules.atr_mult}×ATR)</dt><dd>${f(p.stop,1)}</dd>
       <dt>Цель (${s.rules.rr}R)</dt><dd>${f(p.tp,1)}</dd><dt>Объём</dt><dd>${p.qty} BTC (${usd(p.notional)})</dd>
       <dt>Залог при ${s.leverage}x</dt><dd>${usd(p.margin)}</dd><dt>Риск с комиссией</dt><dd class="neg">${usd(p.risk)} · ${f(p.risk_pct,1)}%</dd>
       <dt>Потенциал</dt><dd class="pos">${usd(p.reward)}</dd><dt>Ликвидация ≈</dt><dd>${p.liq?f(p.liq,1):'нет при этом балансе'}</dd></dl>
       ${p.notes.map(n=>`<div class="note">${esc(n)}</div>`).join('')}
       ${can?'':`<div class="alert">Сделка недоступна: ${esc(s.why)}</div>`}
-      <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Открыть ${p.side}</button>`;
-    if(can)$('openBtn').onclick=()=>openTrade(`Открыть ${p.side} ${p.qty} BTC по рынку?\nСтоп ${f(p.stop,1)}, цель ${f(p.tp,1)}, риск ${usd(p.risk)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
+      <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Поставить лимитку ${p.side}</button>`;
+    if(can)$('openBtn').onclick=()=>openTrade(`Поставить лимитку ${p.side} ${p.qty} BTC по ${f(p.price,1)} (до ${t(p.gtd)})?\nСтоп ${f(p.stop,1)}, цель ${f(p.tp,1)}, риск ${usd(p.risk)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
   } else $('plan').innerHTML=`<div class="muted">${esc(s.why||'Ждём сигнала на закрытии 4-часовой свечи.')}</div>`;
   const ps=a&&a.pos;
   if(ps){
@@ -371,6 +375,14 @@ function render(){
       ${sl?'':'<div class="alert">На бирже нет стопа — позиция не защищена.</div>'}
       <button class="ghost" id="closeBtn">Закрыть по рынку</button>`;
     $('closeBtn').onclick=closePos;
+  } else if(s.pending){
+    const q=s.pending;
+    $('pos').innerHTML=`<div class="big ${q.side==='LONG'?'long':'short'}">Ждём исполнения</div>
+      <dl><dt>Лимитка</dt><dd>${q.side} ${q.qty} BTC по ${f(q.entry,1)}</dd><dt>Действует до</dt><dd>${t(q.gtd)}</dd>
+      <dt>Стоп на бирже</dt><dd>${f(q.stop,1)}</dd><dt>Тейк на бирже</dt><dd>${f(q.tp,1)}</dd><dt>Риск</dt><dd class="neg">${usd(q.risk_usd)}</dd></dl>
+      <div class="muted">Если цена не вернётся к уровню до указанного времени, заявка снимется сама.</div>
+      <button class="ghost" id="cancelLimitBtn">Снять заявку</button>`;
+    $('cancelLimitBtn').onclick=cancelLimit;
   } else $('pos').innerHTML='<div class="muted">Открытых позиций нет.</div>';
   const l=s.lock;
   if(l){
@@ -378,13 +390,15 @@ function render(){
       :`<div class="big long">Торговля разрешена</div>`+(l.disabled?'<div class="muted">Блокировка выключена на демо-счёте, на реальном включится сама</div>':''))+
       `<dl><dt>Убытков подряд (неделя)</dt><dd>${l.consec_losses} из ${s.rules.max_consec}</dd>
        <dt>P&amp;L недели</dt><dd class="${cls(l.week_pnl)}">${usd(l.week_pnl)} · ${f(l.week_pct,1)}%</dd>
-       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Фоновая проверка</dt><dd>${s.bg?(s.bg.error?'<span class="neg">ошибка</span>':esc(s.bg.source)+', '+t(s.bg.at)):'ещё не запускалась'}</dd><dt>Риск на сделку</dt><dd>${s.rules.risk_pct}% (макс. ${s.rules.max_risk_pct}%)</dd></dl>`;
+       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Фоновая проверка</dt><dd>${s.bg?(s.bg.error?'<span class="neg">ошибка</span>':esc(s.bg.source)+', '+t(s.bg.at)):'ещё не запускалась'}</dd><dt>Капитал системы</dt><dd>${s.sizing?usd(s.sizing.equity):'—'}</dd>
+       <dt>Риск сделки</dt><dd>${s.sizing?`${usd(s.sizing.risk)} = ${s.rules.risk_pct}% базы`+(s.sizing.series>0?` + ${usd(s.sizing.series)} прибыли серии`:''):'—'}</dd>
+       <dt>Цель серии (×2)</dt><dd>${s.sizing?usd(s.sizing.target):'—'}</dd></dl>`;
   }
   const st=s.stats||{n:0};
   $('stats').textContent=st.n?`Сделок ${st.n} · прибыльных ${f(st.winrate,0)}% · средний результат ${f(st.avg_r,2)}R · итого ${usd(st.total)} · макс. просадка ${usd(-st.max_dd)}`:'Закрытых сделок пока нет.';
   const jr=s.journal||[];
   $('jr').innerHTML=jr.length?`<table><thead><tr><th>Открыта</th><th>Сторона</th><th>Объём</th><th>Вход</th><th>Стоп</th><th>Цель</th><th>Риск</th><th>Выход</th><th>P&amp;L</th><th>R</th></tr></thead><tbody>${
-    jr.map(r=>`<tr><td>${t(r.opened_at)}</td><td class="${r.side==='LONG'?'long':'short'}">${r.side}</td><td>${r.qty}</td><td>${f(r.entry,1)}</td><td>${f(r.stop,1)}</td><td>${f(r.tp,1)}</td><td>${usd(r.risk_usd)}</td><td>${r.status==='OPEN'?'открыта':f(r.exit_price,1)}</td><td class="${cls(r.pnl)}">${r.pnl==null?'—':usd(r.pnl)}</td><td class="${cls(r.r)}">${r.r==null?'—':f(r.r,2)}</td></tr>`).join('')}</tbody></table>`:'';
+    jr.map(r=>`<tr><td>${t(r.opened_at)}</td><td class="${r.side==='LONG'?'long':'short'}">${r.side}</td><td>${r.qty}</td><td>${f(r.entry,1)}</td><td>${f(r.stop,1)}</td><td>${f(r.tp,1)}</td><td>${usd(r.risk_usd)}</td><td>${({OPEN:'открыта',PENDING:'заявка',EXPIRED:'не исполнилась',CANCELED:'снята'})[r.status]||f(r.exit_price,1)}</td><td class="${cls(r.pnl)}">${r.pnl==null?'—':usd(r.pnl)}</td><td class="${cls(r.r)}">${r.r==null?'—':f(r.r,2)}</td></tr>`).join('')}</tbody></table>`:'';
 }
 $('iv').value=IV;$('ivTitle').textContent=IV.toUpperCase();
 $('iv').onchange=()=>{IV=$('iv').value;try{localStorage.setItem('iv',IV);}catch(e){}$('ivTitle').textContent=IV.toUpperCase();$('sig').textContent='Загрузка…';LAST_SIG=null;load();};
