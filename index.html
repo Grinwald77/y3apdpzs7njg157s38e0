@@ -75,7 +75,9 @@ th:first-child,td:first-child{text-align:left}
     <div id="histInfo" class="muted"></div></summary><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
     <div class="muted">Прогоняет правило по последним 1 500 свечам выбранного периода и EMA: стоп 1,5 / 2 / 3 ATR, вход по рынку или лимиткой на откате к уровню пробоя. Цель — 2R, комиссия Binance учтена.</div>
-    <button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
+    <button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button>
+    <span style="white-space:nowrap"><button class="ghost" id="capBtn">Рост капитала</button>
+    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
   <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div>
     <button class="ghost" id="jrClear">Очистить журнал</button></section>
 </div>
@@ -168,7 +170,7 @@ function backtest(K,emaN,mult,mode,rr){
   }
   const n=res.length,w=res.filter(r=>r.gross>0).length;let s=0,streak=0,maxS=0,cum=0,peak=0,dd=0;
   for(const r of res){cum+=r.net;peak=Math.max(peak,cum);dd=Math.max(dd,peak-cum);if(r.net<0){streak++;maxS=Math.max(maxS,streak);}else streak=0;}
-  return{n,win:n?w/n*100:0,grossR:n?res.reduce((a,r)=>a+r.gross,0)/n:0,netR:n?res.reduce((a,r)=>a+r.net,0)/n:0,totalR:cum,maxS,dd};
+  return{list:res.map(r=>r.net),n,win:n?w/n*100:0,grossR:n?res.reduce((a,r)=>a+r.gross,0)/n:0,netR:n?res.reduce((a,r)=>a+r.net,0)/n:0,totalR:cum,maxS,dd};
 }
 async function runBacktest(){
   const b=$('btBtn');b.disabled=true;$('btInfo').textContent='Загружаю свечи…';$('bt').innerHTML='';
@@ -208,6 +210,39 @@ async function runAllTests(){
       <div class="muted" style="margin-top:8px">Бледные строки — меньше 10 сделок, по ним выводы делать рано. Надёжный признак — когда в плюсе несколько соседних вариантов (тот же период и вход при разных EMA или стопах), а не один случайный.</div>`;
   }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
   b.disabled=b2.disabled=false;
+}
+
+// путь капитала с $50 по сделкам истории: два способа размера позиции
+function simCapital(list,riskPct,mode){
+  const b=riskPct/100;let eq=50,start=50,series=0,doubles=0,peak=50,dd=0,minEq=50,ruined=false;
+  for(const r of list){
+    let risk=mode==='fixed'?eq*b:start*b+series;risk=Math.min(risk,eq);
+    const pnl=risk*r;eq+=pnl;
+    peak=Math.max(peak,eq);dd=Math.max(dd,(peak-eq)/peak*100);minEq=Math.min(minEq,eq);
+    if(mode==='fixed'){if(eq>=2*start){doubles++;start=eq;}}
+    else if(pnl>0){series+=pnl;if(eq>=2*start){doubles++;start=eq;series=0;}}
+    else{start=eq;series=0;}
+    if(eq<1){ruined=true;eq=Math.max(eq,0);break;}
+  }
+  return{eq,doubles,dd,minEq,ruined};
+}
+async function runCapital(){
+  const b=$('capBtn');b.disabled=true;$('bt').innerHTML='';$('btInfo').textContent='Считаю…';
+  try{
+    const riskPct=Number($('capRisk').value),rr=(S&&S.rules&&S.rules.rr)||2,n=Number(EMA)||200;
+    const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${IV}&limit=1500`);
+    const K=(await r.json()).filter(x=>x[6]<Date.now()),days=(K.at(-1)[6]-K[0][6])/864e5,rows=[];
+    for(const mode of ['retest','market'])for(const m of [1.5,2,3]){
+      const bt=backtest(K,n,m,mode,rr);
+      for(const sz of ['fixed','house'])rows.push({mode,m,sz,trades:bt.n,win:bt.win,netR:bt.netR,...simCapital(bt.list,riskPct,sz)});
+    }
+    rows.sort((a,b)=>b.eq-a.eq);
+    $('btInfo').textContent=`Старт $50 · риск ${riskPct}% · BTCUSDT ${IV.toUpperCase()} · EMA ${n} · ${f(days,0)} дней истории · цель ${rr}R`;
+    $('bt').innerHTML=`<table><thead><tr><th>Вход</th><th>Стоп</th><th>Размер позиции</th><th>Сделок</th><th>Прибыльных</th><th>R с ком.</th><th>Итог</th><th>Удвоений</th><th>Худшая просадка</th><th>Минимум счёта</th></tr></thead><tbody>${
+      rows.map(x=>`<tr><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.sz==='fixed'?`${riskPct}% от счёта`:'база + прибыль серии'}</td><td>${x.trades}</td><td>${f(x.win,0)}%</td><td class="${cls(x.netR)}">${f(x.netR,2)}</td><td class="${x.eq>=50?'pos':'neg'}">${x.ruined?'обнулён':usd(x.eq)}</td><td>${x.doubles}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minEq)}</td></tr>`).join('')}</tbody></table>
+      <div class="muted" style="margin-top:8px">«${riskPct}% от счёта» — каждая сделка рискует ${riskPct}% текущего баланса. «База + прибыль серии» — риск ${riskPct}% плюс вся прибыль текущей серии побед; после убытка или удвоения серия начинается заново. «Удвоений» — сколько раз счёт вырастал вдвое от начала серии. Проскальзывание и минимальный размер ордера не учтены.</div>`;
+  }catch(e){$('btInfo').textContent='Ошибка: '+e.message;}
+  b.disabled=false;
 }
 async function clearJournal(){
   if(!confirm('Удалить все закрытые сделки из журнала? Открытая позиция (если есть) останется.'))return;
@@ -357,7 +392,7 @@ $('ema').value=EMA;
 $('ema').onchange=()=>{EMA=$('ema').value;try{localStorage.setItem('ema',EMA);}catch(e){}$('sig').textContent='Загрузка…';LAST_SIG=null;load();history24();};
 document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();}catch(e){}},{once:true});
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
-$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('jrClear').onclick=clearJournal;
+$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('jrClear').onclick=clearJournal;
 projectLook();
 if(PW)login();else logout();
 </script>
