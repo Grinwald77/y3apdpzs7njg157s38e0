@@ -71,7 +71,8 @@ th:first-child,td:first-child{text-align:left}
   <section class="card"><h2>План сделки</h2><div id="plan"></div></section>
   <section class="card"><h2>Позиция</h2><div id="pos"></div></section>
   <section class="card"><h2>Риск-контроль</h2><div id="lock"></div></section>
-  <section class="card wide"><h2>История сигналов за сутки</h2><div id="histInfo" class="muted"></div><div class="scroll" id="hist"></div></section>
+  <section class="card wide"><details id="histBox"><summary style="cursor:pointer;list-style:none"><h2 style="display:inline">История сигналов за сутки ▾</h2>
+    <div id="histInfo" class="muted"></div></summary><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
     <div class="muted">Прогоняет правило по последним 1 500 свечам выбранного периода и EMA: стоп 1,5 / 2 / 3 ATR, вход по рынку или лимиткой на откате к уровню пробоя. Цель — 2R, комиссия Binance учтена.</div>
     <button class="ghost" id="btBtn">Запустить тест</button><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
