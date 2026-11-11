@@ -388,9 +388,9 @@ function render(){
   if(l){
     $('lock').innerHTML=(l.locked?`<div class="big short">Блокировка</div><div>${esc(l.reason)}</div><div class="muted">до ${t(l.until)}</div>`
       :`<div class="big long">Торговля разрешена</div>`+(l.disabled?'<div class="muted">Блокировка выключена на демо-счёте, на реальном включится сама</div>':''))+
-      `<dl><dt>Убытков подряд (неделя)</dt><dd>${l.consec_losses} из ${s.rules.max_consec}</dd>
+      `<dl><dt>Убытков подряд (неделя)</dt><dd>${l.consec_losses}</dd>
        <dt>P&amp;L недели</dt><dd class="${cls(l.week_pnl)}">${usd(l.week_pnl)} · ${f(l.week_pct,1)}%</dd>
-       <dt>Лимит недели</dt><dd>−${s.rules.weekly}%</dd><dt>Фоновая проверка</dt><dd>${s.bg?(s.bg.error?'<span class="neg">ошибка</span>':esc(s.bg.source)+', '+t(s.bg.at)):'ещё не запускалась'}</dd><dt>Капитал системы</dt><dd>${s.sizing?usd(s.sizing.equity):'—'}</dd>
+       <dt>Лимит недели</dt><dd>−${s.rules.weekly}% → пауза 3 рабочих дня</dd><dt>Фоновая проверка</dt><dd>${s.bg?(s.bg.error?'<span class="neg">ошибка</span>':esc(s.bg.source)+', '+t(s.bg.at)):'ещё не запускалась'}</dd><dt>Капитал системы</dt><dd>${s.sizing?usd(s.sizing.equity):'—'}</dd>
        <dt>Риск сделки</dt><dd>${s.sizing?`${usd(s.sizing.risk)} = ${s.rules.risk_pct}% базы`+(s.sizing.series>0?` + ${usd(s.sizing.series)} прибыли серии`:''):'—'}</dd>
        <dt>Цель серии (×2)</dt><dd>${s.sizing?usd(s.sizing.target):'—'}</dd></dl>`;
   }
