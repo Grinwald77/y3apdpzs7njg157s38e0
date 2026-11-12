@@ -270,7 +270,7 @@ function macdArr(C,fa,sl,sg){
 function backtest2(K,o){
   const H=K.map(x=>+x[2]),L=K.map(x=>+x[3]),C=K.map(x=>+x[4]),V=K.map(x=>+x[5]);
   const h=macdArr(C,o.fa,o.sl,o.sg),A=atrArr(H,L,C,14),FEE=0.0005,LEV=100;
-  let D=50,peak=50,dd=0,minD=50,trades=0,wins=0,streak=0,maxS=0,i=Math.max(o.sl+o.sg+2,22);
+  const ST=o.step||10;let tg=0,tr=0,D=50,peak=50,dd=0,minD=50,trades=0,wins=0,streak=0,maxS=0,i=Math.max(o.sl+o.sg+2,22);
   const vAvg=k=>{let s=0;for(let j=k-20;j<k;j++)s+=V[j];return s/20;};
   while(i<C.length-1){
     if(h[i]==null||h[i-1]==null||h[i-2]==null||A[i]==null){i++;continue;}
@@ -289,10 +289,10 @@ function backtest2(K,o){
     let stopP=entry-side*d,lock=null,out=null,k;
     for(k=i+1;k<C.length;k++){
       const worst=side>0?L[k]:H[k],best=side>0?H[k]:L[k];
-      if(side>0?worst<=stopP:worst>=stopP){out=pnlAt(stopP);break;}
-      if(pnlAt(best)>=T){out=T;break;}
+      if(side>0?worst<=stopP:worst>=stopP){out=pnlAt(stopP);if(lock!=null)tr++;break;}
+      if(pnlAt(best)>=T){out=T;tg++;break;}
       const prof=pnlAt(best)/D*100; // прирост депозита, %
-      if(prof>=10){const steps=Math.floor(prof/10);const nl=steps*10-5;if(lock==null||nl>lock){lock=nl;stopP=entry+side*(lock/100*D)/q;}}
+      if(prof>=ST){const steps=Math.floor(prof/ST);const nl=steps*ST-ST/2;if(lock==null||nl>lock){lock=nl;stopP=entry+side*(lock/100*D)/q;}}
     }
     if(out==null)break;
     const pnl=out-2*FEE*q*entry;D+=pnl;trades++;
@@ -301,10 +301,10 @@ function backtest2(K,o){
     if(D<1){D=Math.max(D,0);break;}
     i=k+1;
   }
-  return{n:trades,win:trades?wins/trades*100:0,eq:D,dd,minD,maxS};
+  return{n:trades,win:trades?wins/trades*100:0,eq:D,dd,minD,maxS,tg,tr};
 }
 async function runSys2(){
-  const b=$('m2Btn');b.disabled=true;$('bt').innerHTML='';const rows=[];
+  const b=$('m2Btn');b.disabled=true;$('bt').innerHTML='';const rows=[],rows1=[];
   const per=[['1m',10],['15m',180],['30m',180],['1h',180],['2h',180],['4h',180]];
   const macds=[[12,26,9],[8,21,5],[20,50,9],[50,200,9]];
   try{
@@ -312,18 +312,24 @@ async function runSys2(){
       $('btInfo').textContent=`Загружаю ${iv.toUpperCase()} за ${days} дней…`;
       const K=await klinesRange(iv,days);if(K.length<300)continue;
       const realDays=(K.at(-1)[6]-K[0][6])/864e5;
-      for(const [fa,sl,sg] of macds)for(const trig of ['early','cross'])for(const vol of [false,true])for(const tgt of [50,100])for(const atrM of [1,1.5,2])
-        rows.push({iv,days:realDays,fa,sl,sg,trig,vol,tgt,atrM,...backtest2(K,{fa,sl,sg,trig,vol,tgt,atrM})});
+      for(const [fa,sl,sg] of macds)for(const trig of ['early','cross'])for(const vol of [false,true])for(const tgt of [50,100])for(const atrM of [1,1.5,2])for(const step of [10,20,25])
+        rows.push({iv,days:realDays,fa,sl,sg,trig,vol,tgt,atrM,step,...backtest2(K,{fa,sl,sg,trig,vol,tgt,atrM,step})});
+      const rr1=(S&&S.rules&&S.rules.rr)||2;
+      for(const n of [20,50,100,200])for(const mode of ['market','retest'])for(const m of [1.5,2,3]){
+        const bt=backtest(K,n,m,mode,rr1);rows1.push({iv,days:realDays,n,mode,m,trades:bt.n,win:bt.win,...simCapital(bt.list,10,'house')});}
       await new Promise(z=>setTimeout(z,0));
     }
     rows.sort((a,b)=>(b.n>=10)-(a.n>=10)||b.win-a.win||b.eq-a.eq);
     const plus=rows.filter(x=>x.n>=10&&x.eq>50).length;
     $('btInfo').textContent=`Система 2 · проверено ${rows.length} вариантов · с прибылью (от 10 сделок): ${plus} · старт $50 · сортировка по проценту удачных сделок`;
-    const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>${x.n}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
-    const head=`<thead><tr><th>Период</th><th>Дней</th><th>MACD</th><th>Сигнал</th><th>Фильтр объёма</th><th>Цель к депозиту</th><th>Первый стоп</th><th>Сделок</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th><th>Убытков подряд</th></tr></thead>`;
+    const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}% / −${x.step/2}%</td><td>${x.n}</td><td>${x.tg}</td><td>${x.tr}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
+    const head=`<thead><tr><th>Период</th><th>Дней</th><th>MACD</th><th>Сигнал</th><th>Фильтр объёма</th><th>Цель к депозиту</th><th>Первый стоп</th><th>Шаг подтяжки</th><th>Сделок</th><th>До цели</th><th>По подтяжке</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th><th>Убытков подряд</th></tr></thead>`;
     $('bt').innerHTML=`<table>${head}<tbody>${rows.slice(0,25).map(tr).join('')}</tbody></table>
       <details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows.length} вариантов</summary><table>${head}<tbody>${rows.slice(25).map(tr).join('')}</tbody></table></details>
-      <div class="muted" style="margin-top:8px">Правила в деньгах: цель — +X% к депозиту; первый стоп — 15% от цели (5 неудач ≈ 75% цели); при +10% к депозиту стоп переносится на +5%, дальше каждые +10% подтягивают стоп ещё на 10%. Плечо не больше 100x, комиссия 0,05% на вход и выход. Стакан в истории недоступен, поэтому перенос тейк-профита по стакану здесь не проверяется. 1m — только 10 дней (иначе слишком много данных).</div>`;
+      <div class="muted" style="margin-top:8px">Правила в деньгах: цель — +X% к депозиту; первый стоп — 15% от цели (5 неудач ≈ 75% цели); при +10% к депозиту стоп переносится на +5%, дальше каждые +10% подтягивают стоп ещё на 10%. Плечо не больше 100x, комиссия 0,05% на вход и выход. Стакан в истории недоступен, поэтому перенос тейк-профита по стакану здесь не проверяется. 1m — только 10 дней (иначе слишком много данных). «Шаг подтяжки +10% / −5%» — при каждых +10% к депозиту стоп поднимается и отстаёт на 5%. «До цели» — сколько сделок закрылись по цели, «По подтяжке» — сколько закрылись подтянутым стопом.</div>
+      <h3 style="margin-top:18px">Система 1 на тех же днях (риск 10%, база + прибыль серии, старт $50)</h3>
+      <table><thead><tr><th>Период</th><th>Дней</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Сделок</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th></tr></thead><tbody>${
+      rows1.sort((a,b)=>b.eq-a.eq).slice(0,15).map(x=>`<tr style="${x.trades<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.ruined?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minEq)}</td></tr>`).join('')}</tbody></table>`;
   }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
   b.disabled=false;
 }
