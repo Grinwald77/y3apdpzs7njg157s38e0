@@ -75,9 +75,10 @@ th:first-child,td:first-child{text-align:left}
     <div id="histInfo" class="muted"></div></summary><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
     <div class="muted">Прогоняет правило по последним 1 500 свечам выбранного периода и EMA: стоп 1,5 / 2 / 3 ATR, вход по рынку или лимиткой на откате к уровню пробоя. Цель — 2R, комиссия Binance учтена.</div>
-    <button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button>
+    <select id="sysSel" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="1">Система 1 — пробой</option><option value="2">Система 2 — MACD</option></select>
+    <span id="sys1Btns"><button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button>
     <span style="white-space:nowrap"><button class="ghost" id="capBtn">Рост капитала</button>
-    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
+    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span></span><span id="sys2Btns" style="display:none"><button class="ghost" id="m2Btn">Тест Системы 2 (все варианты, полгода)</button></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
   <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div>
     <button class="ghost" id="jrClear">Очистить журнал</button></section>
 </div>
@@ -244,6 +245,88 @@ async function runCapital(){
   }catch(e){$('btInfo').textContent='Ошибка: '+e.message;}
   b.disabled=false;
 }
+
+// ===== Система 2: MACD, всё в деньгах от депозита =====
+async function klinesRange(iv,days){
+  const end=Date.now(),start=end-days*864e5;let from=start,out=[];
+  while(from<end){
+    const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=1500&startTime=${from}`);
+    const k=await r.json();if(!Array.isArray(k)||!k.length)break;
+    out=out.concat(k);const last=k.at(-1)[6];if(k.length<1500)break;from=last+1;
+    await new Promise(z=>setTimeout(z,120));
+  }
+  return out.filter(x=>x[6]<Date.now());
+}
+function macdArr(C,fa,sl,sg){
+  const ef=emaArr(C,fa),es=emaArr(C,sl),m=C.map((_,i)=>ef[i]==null||es[i]==null?null:ef[i]-es[i]);
+  const st=m.findIndex(x=>x!=null),sig=Array(C.length).fill(null),hist=Array(C.length).fill(null);
+  const k=2/(sg+1);if(st<0||st+sg>C.length)return hist;
+  let e=m.slice(st,st+sg).reduce((a,b)=>a+b,0)/sg;sig[st+sg-1]=e;
+  for(let i=st+sg;i<C.length;i++){e=m[i]*k+e*(1-k);sig[i]=e;}
+  for(let i=0;i<C.length;i++)if(sig[i]!=null)hist[i]=m[i]-sig[i];
+  return hist;
+}
+// o: {fa,sl,sg, trig:'early'|'cross', vol:bool, tgt: цель в % депозита, atrM: дистанция первого стопа в ATR}
+function backtest2(K,o){
+  const H=K.map(x=>+x[2]),L=K.map(x=>+x[3]),C=K.map(x=>+x[4]),V=K.map(x=>+x[5]);
+  const h=macdArr(C,o.fa,o.sl,o.sg),A=atrArr(H,L,C,14),FEE=0.0005,LEV=100;
+  let D=50,peak=50,dd=0,minD=50,trades=0,wins=0,streak=0,maxS=0,i=Math.max(o.sl+o.sg+2,22);
+  const vAvg=k=>{let s=0;for(let j=k-20;j<k;j++)s+=V[j];return s/20;};
+  while(i<C.length-1){
+    if(h[i]==null||h[i-1]==null||h[i-2]==null||A[i]==null){i++;continue;}
+    let side=0;
+    if(o.trig==='early'){ // столбики в противоположной зоне уменьшаются 2 свечи подряд
+      if(h[i]<0&&h[i]>h[i-1]&&h[i-1]>h[i-2])side=1;
+      else if(h[i]>0&&h[i]<h[i-1]&&h[i-1]<h[i-2])side=-1;
+    }else{ // линии пересеклись, гистограмма сменила зону
+      if(h[i-1]<=0&&h[i]>0)side=1;else if(h[i-1]>=0&&h[i]<0)side=-1;
+    }
+    if(side&&o.vol&&!(V[i]>vAvg(i)))side=0;
+    if(!side){i++;continue;}
+    const entry=C[i],T=D*o.tgt/100,risk=0.15*T,d=o.atrM*A[i];
+    let q=risk/d;q=Math.min(q,D*LEV/entry);
+    const pnlAt=p=>side*(p-entry)*q;
+    let stopP=entry-side*d,lock=null,out=null,k;
+    for(k=i+1;k<C.length;k++){
+      const worst=side>0?L[k]:H[k],best=side>0?H[k]:L[k];
+      if(side>0?worst<=stopP:worst>=stopP){out=pnlAt(stopP);break;}
+      if(pnlAt(best)>=T){out=T;break;}
+      const prof=pnlAt(best)/D*100; // прирост депозита, %
+      if(prof>=10){const steps=Math.floor(prof/10);const nl=steps*10-5;if(lock==null||nl>lock){lock=nl;stopP=entry+side*(lock/100*D)/q;}}
+    }
+    if(out==null)break;
+    const pnl=out-2*FEE*q*entry;D+=pnl;trades++;
+    if(pnl>0){wins++;streak=0;}else{streak++;maxS=Math.max(maxS,streak);}
+    peak=Math.max(peak,D);dd=Math.max(dd,(peak-D)/peak*100);minD=Math.min(minD,D);
+    if(D<1){D=Math.max(D,0);break;}
+    i=k+1;
+  }
+  return{n:trades,win:trades?wins/trades*100:0,eq:D,dd,minD,maxS};
+}
+async function runSys2(){
+  const b=$('m2Btn');b.disabled=true;$('bt').innerHTML='';const rows=[];
+  const per=[['1m',10],['15m',180],['30m',180],['1h',180],['2h',180],['4h',180]];
+  const macds=[[12,26,9],[8,21,5],[20,50,9],[50,200,9]];
+  try{
+    for(const [iv,days] of per){
+      $('btInfo').textContent=`Загружаю ${iv.toUpperCase()} за ${days} дней…`;
+      const K=await klinesRange(iv,days);if(K.length<300)continue;
+      const realDays=(K.at(-1)[6]-K[0][6])/864e5;
+      for(const [fa,sl,sg] of macds)for(const trig of ['early','cross'])for(const vol of [false,true])for(const tgt of [50,100])for(const atrM of [1,1.5,2])
+        rows.push({iv,days:realDays,fa,sl,sg,trig,vol,tgt,atrM,...backtest2(K,{fa,sl,sg,trig,vol,tgt,atrM})});
+      await new Promise(z=>setTimeout(z,0));
+    }
+    rows.sort((a,b)=>(b.n>=10)-(a.n>=10)||b.win-a.win||b.eq-a.eq);
+    const plus=rows.filter(x=>x.n>=10&&x.eq>50).length;
+    $('btInfo').textContent=`Система 2 · проверено ${rows.length} вариантов · с прибылью (от 10 сделок): ${plus} · старт $50 · сортировка по проценту удачных сделок`;
+    const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>${x.n}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
+    const head=`<thead><tr><th>Период</th><th>Дней</th><th>MACD</th><th>Сигнал</th><th>Фильтр объёма</th><th>Цель к депозиту</th><th>Первый стоп</th><th>Сделок</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th><th>Убытков подряд</th></tr></thead>`;
+    $('bt').innerHTML=`<table>${head}<tbody>${rows.slice(0,25).map(tr).join('')}</tbody></table>
+      <details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows.length} вариантов</summary><table>${head}<tbody>${rows.slice(25).map(tr).join('')}</tbody></table></details>
+      <div class="muted" style="margin-top:8px">Правила в деньгах: цель — +X% к депозиту; первый стоп — 15% от цели (5 неудач ≈ 75% цели); при +10% к депозиту стоп переносится на +5%, дальше каждые +10% подтягивают стоп ещё на 10%. Плечо не больше 100x, комиссия 0,05% на вход и выход. Стакан в истории недоступен, поэтому перенос тейк-профита по стакану здесь не проверяется. 1m — только 10 дней (иначе слишком много данных).</div>`;
+  }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
+  b.disabled=false;
+}
 async function clearJournal(){
   if(!confirm('Удалить все закрытые сделки из журнала? Открытая позиция (если есть) останется.'))return;
   const r=await api('/api/journal/clear');if(!r.ok)alert('Ошибка: '+r.error);load();
@@ -406,7 +489,10 @@ $('ema').value=EMA;
 $('ema').onchange=()=>{EMA=$('ema').value;try{localStorage.setItem('ema',EMA);}catch(e){}$('sig').textContent='Загрузка…';LAST_SIG=null;load();history24();};
 document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();}catch(e){}},{once:true});
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
-$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('jrClear').onclick=clearJournal;
+$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('m2Btn').onclick=runSys2;
+$('sysSel').value=localStorage.getItem('sysSel')||'1';
+const sysShow=()=>{const v=$('sysSel').value;$('sys1Btns').style.display=v==='1'?'':'none';$('sys2Btns').style.display=v==='2'?'':'none';localStorage.setItem('sysSel',v);};
+$('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
 projectLook();
 if(PW)login();else logout();
 </script>
