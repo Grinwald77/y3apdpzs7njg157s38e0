@@ -78,7 +78,7 @@ th:first-child,td:first-child{text-align:left}
     <select id="sysSel" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="1">Система 1 — пробой</option><option value="2">Система 2 — MACD</option></select>
     <span id="sys1Btns"><button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button>
     <span style="white-space:nowrap"><button class="ghost" id="capBtn">Рост капитала</button>
-    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span></span><span id="sys2Btns" style="display:none"><button class="ghost" id="m2Btn">Тест Системы 2 (все варианты, полгода)</button></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
+    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span></span><span id="sys2Btns" style="display:none"><button class="ghost" id="m2Btn">Тест Системы 2 (все варианты, полгода)</button> <button class="ghost" id="oosBtn" disabled>Проверка на прошлом полугодии</button> <button class="ghost" id="csvBtn" disabled>Скачать CSV</button></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
   <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div>
     <button class="ghost" id="jrClear">Очистить журнал</button></section>
 </div>
@@ -247,15 +247,15 @@ async function runCapital(){
 }
 
 // ===== Система 2: MACD, всё в деньгах от депозита =====
-async function klinesRange(iv,days){
-  const end=Date.now(),start=end-days*864e5;let from=start,out=[];
+async function klinesRange(iv,days,endMs){
+  const end=endMs||Date.now(),start=end-days*864e5;let from=start,out=[];
   while(from<end){
     const r=await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${iv}&limit=1500&startTime=${from}`);
     const k=await r.json();if(!Array.isArray(k)||!k.length)break;
     out=out.concat(k);const last=k.at(-1)[6];if(k.length<1500)break;from=last+1;
     await new Promise(z=>setTimeout(z,120));
   }
-  return out.filter(x=>x[6]<Date.now());
+  return out.filter(x=>x[6]<end&&x[6]<Date.now());
 }
 function macdArr(C,fa,sl,sg){
   const ef=emaArr(C,fa),es=emaArr(C,sl),m=C.map((_,i)=>ef[i]==null||es[i]==null?null:ef[i]-es[i]);
@@ -303,6 +303,43 @@ function backtest2(K,o){
   }
   return{n:trades,win:trades?wins/trades*100:0,eq:D,dd,minD,maxS,tg,tr};
 }
+
+let LAST2=null;
+// проверка лучших вариантов на предыдущем полугодии (те же настройки, другие данные)
+async function runOOS(){
+  if(!LAST2)return;const b=$('oosBtn');b.disabled=true;
+  const end=Date.now()-180*864e5,top2=LAST2.rows.filter(x=>x.n>=10).sort((a,b)=>b.eq-a.eq).slice(0,10);
+  const top1=LAST2.rows1.filter(x=>x.trades>=10).sort((a,b)=>b.eq-a.eq).slice(0,5),cache={},out2=[],out1=[];
+  const K=async iv=>cache[iv]||(cache[iv]=await klinesRange(iv,180,end));
+  try{
+    for(const x of top2){$('btInfo').textContent=`Прошлое полугодие: загружаю ${x.iv.toUpperCase()}…`;
+      out2.push({...x,old:backtest2(await K(x.iv),x)});}
+    const rr1=(S&&S.rules&&S.rules.rr)||2;
+    for(const x of top1){const bt=backtest(await K(x.iv),x.n,x.m,x.mode,rr1);out1.push({...x,old:{trades:bt.n,win:bt.win,...simCapital(bt.list,10,'house')}});}
+    LAST2.oos={out2,out1,from:end-180*864e5,to:end};
+    const usd2=v=>v<1?'обнулён':usd(v),c=v=>v>=50?'pos':'neg';
+    $('btInfo').textContent=`Проверка: лучшие варианты последних 180 дней на предыдущих 180 днях (${t(end-180*864e5)} — ${t(end)}), настройки без изменений`;
+    $('bt').innerHTML=`<h3>Система 2 — 10 лучших по итогу</h3><table><thead><tr><th>Период</th><th>MACD</th><th>Сигнал</th><th>Объём</th><th>Цель</th><th>Стоп</th><th>Шаг</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
+      out2.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний':'пересечение'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}%</td><td>${x.n} / <span class="${c(x.eq)}">${usd2(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.n} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${usd2(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>
+      <h3 style="margin-top:18px">Система 1 — 5 лучших по итогу</h3><table><thead><tr><th>Период</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
+      out1.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades} / <span class="${c(x.eq)}">${x.ruined?'обнулён':usd(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.trades} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${x.old.ruined?'обнулён':usd(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>
+      <div class="muted" style="margin-top:8px">Если вариант в плюсе и на прошлом полугодии — закономерность, скорее всего, настоящая. Если там он в минусе — его успех на последних 180 днях, вероятно, случайность.</div>`;
+  }catch(e){$('btInfo').textContent='Ошибка проверки: '+e.message;}
+  b.disabled=false;
+}
+// CSV для импорта: разделитель «;», десятичная запятая, UTF-8
+function downloadCSV(){
+  if(!LAST2)return;const n=v=>v==null?'':String(Math.round(v*100)/100).replace('.',','),q=v=>`"${String(v).replace(/"/g,'""')}"`;
+  const L=[['Система','Период','Дней','MACD / EMA','Сигнал / вход','Фильтр объёма','Цель к депозиту %','Первый стоп ATR','Шаг подтяжки %','Сделок','До цели','По подтяжке','Удачных %','Итог $','Просадка %','Минимум $','Убытков подряд','Прошлое полугодие: сделок','Прошлое: удачных %','Прошлое: итог $','Прошлое: просадка %'].map(q).join(';')];
+  const o2=new Map((LAST2.oos?LAST2.oos.out2:[]).map(x=>[[x.iv,x.fa,x.sl,x.sg,x.trig,x.vol,x.tgt,x.atrM,x.step].join('|'),x.old]));
+  for(const x of LAST2.rows){const o=o2.get([x.iv,x.fa,x.sl,x.sg,x.trig,x.vol,x.tgt,x.atrM,x.step].join('|'));
+    L.push([q('2'),q(x.iv.toUpperCase()),n(x.days),q(`${x.fa}/${x.sl}/${x.sg}`),q(x.trig==='early'?'ранний':'пересечение'),q(x.vol?'да':'нет'),n(x.tgt),n(x.atrM),n(x.step),x.n,x.tg,x.tr,n(x.win),n(x.eq),n(x.dd),n(x.minD),x.maxS,o?o.n:'',o?n(o.win):'',o?n(o.eq):'',o?n(o.dd):''].join(';'));}
+  const o1=new Map((LAST2.oos?LAST2.oos.out1:[]).map(x=>[[x.iv,x.n,x.mode,x.m].join('|'),x.old]));
+  for(const x of LAST2.rows1){const o=o1.get([x.iv,x.n,x.mode,x.m].join('|'));
+    L.push([q('1'),q(x.iv.toUpperCase()),n(x.days),q('EMA '+x.n),q(x.mode==='market'?'по рынку':'лимитка'),'','',n(x.m),'',x.trades,'','',n(x.win),n(x.eq),n(x.dd),n(x.minEq),'',o?o.trades:'',o?n(o.win):'',o?n(o.eq):'',o?n(o.dd):''].join(';'));}
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L.join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  a.download=`or-hashefa-test-${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();a.remove();
+}
 async function runSys2(){
   const b=$('m2Btn');b.disabled=true;$('bt').innerHTML='';const rows=[],rows1=[];
   const per=[['1m',10],['15m',180],['30m',180],['1h',180],['2h',180],['4h',180]];
@@ -320,6 +357,7 @@ async function runSys2(){
       await new Promise(z=>setTimeout(z,0));
     }
     rows.sort((a,b)=>(b.n>=10)-(a.n>=10)||b.win-a.win||b.eq-a.eq);
+    LAST2={rows,rows1:rows1.slice(),oos:null};$('oosBtn').disabled=$('csvBtn').disabled=false;
     const plus=rows.filter(x=>x.n>=10&&x.eq>50).length;
     $('btInfo').textContent=`Система 2 · проверено ${rows.length} вариантов · с прибылью (от 10 сделок): ${plus} · старт $50 · сортировка по проценту удачных сделок`;
     const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}% / −${x.step/2}%</td><td>${x.n}</td><td>${x.tg}</td><td>${x.tr}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
@@ -495,7 +533,7 @@ $('ema').value=EMA;
 $('ema').onchange=()=>{EMA=$('ema').value;try{localStorage.setItem('ema',EMA);}catch(e){}$('sig').textContent='Загрузка…';LAST_SIG=null;load();history24();};
 document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();AC.resume();}catch(e){}},{once:true});
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
-$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('m2Btn').onclick=runSys2;
+$('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('m2Btn').onclick=runSys2;$('oosBtn').onclick=runOOS;$('csvBtn').onclick=downloadCSV;
 $('sysSel').value=localStorage.getItem('sysSel')||'1';
 const sysShow=()=>{const v=$('sysSel').value;$('sys1Btns').style.display=v==='1'?'':'none';$('sys2Btns').style.display=v==='2'?'':'none';localStorage.setItem('sysSel',v);};
 $('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
