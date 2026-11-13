@@ -45,6 +45,9 @@ th{color:var(--muted);font-weight:600;font-size:12.5px}
 th:first-child,td:first-child{text-align:left}
 .pos{color:var(--gain);font-weight:700}.neg{color:var(--loss);font-weight:700}
 #err{display:none}
+.fl label{font-size:12.5px;color:var(--muted)}
+.fl select,.fl input{font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+.fl input{width:90px}
 </style>
 </head>
 <body>
@@ -72,13 +75,24 @@ th:first-child,td:first-child{text-align:left}
   <section class="card"><h2>Позиция</h2><div id="pos"></div></section>
   <section class="card"><h2>Риск-контроль</h2><div id="lock"></div></section>
   <section class="card wide"><details id="histBox"><summary style="cursor:pointer;list-style:none"><h2 style="display:inline">История сигналов за сутки ▾</h2>
-    <div id="histInfo" class="muted"></div></summary><div class="scroll" id="hist"></div></details></section>
+    <div id="histInfo" class="muted"></div></summary><div class="fl" style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:8px 0"><label>Таймфрейм <select id="histTf"><option value="">Все</option></select></label><button class="ghost" id="histCsv" style="margin-top:0">Скачать CSV</button></div><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
     <div class="muted">Прогоняет правило по последним 1 500 свечам выбранного периода и EMA: стоп 1,5 / 2 / 3 ATR, вход по рынку или лимиткой на откате к уровню пробоя. Цель — 2R, комиссия Binance учтена.</div>
     <select id="sysSel" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="1">Система 1 — пробой</option><option value="2">Система 2 — MACD</option></select>
     <span id="sys1Btns"><button class="ghost" id="btBtn">Запустить тест</button> <button class="ghost" id="btAllBtn">Тест всех вариантов</button>
     <span style="white-space:nowrap"><button class="ghost" id="capBtn">Рост капитала</button>
-    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span></span><span id="sys2Btns" style="display:none"><button class="ghost" id="m2Btn">Тест Системы 2 (все варианты, полгода)</button> <button class="ghost" id="oosBtn" disabled>Проверка на прошлом полугодии</button> <button class="ghost" id="csvBtn" disabled>Скачать CSV</button></span><div id="btInfo" class="muted" style="margin-top:10px"></div><div class="scroll" id="bt"></div></section>
+    <select id="capRisk" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)"><option value="5">риск 5%</option><option value="10">риск 10%</option><option value="20" selected>риск 20%</option></select></span></span><span id="sys2Btns" style="display:none"><button class="ghost" id="m2Btn">Тест Системы 2 (все варианты, полгода)</button> <button class="ghost" id="oosBtn" disabled>Проверка на прошлом полугодии</button> <button class="ghost" id="csvBtn" disabled>Скачать CSV</button></span><div id="btInfo" class="muted" style="margin-top:10px"></div>
+    <div id="flt" class="fl" style="display:none;margin-top:10px"><div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:end">
+      <label>Период<br><select id="fIv"><option value="">Все</option><option value="1m">1M</option><option value="15m">15M</option><option value="30m">30M</option><option value="1h">1H</option><option value="2h">2H</option><option value="4h">4H</option></select></label>
+      <label>Сигнал / вход<br><select id="fSig"><option value="">Все</option><option value="early">ранний (Система 2)</option><option value="cross">пересечение (Система 2)</option><option value="market">по рынку (Система 1)</option><option value="retest">лимитка (Система 1)</option></select></label>
+      <label>Фильтр объёма<br><select id="fVol"><option value="">Все</option><option value="true">да</option><option value="false">нет</option></select></label>
+      <label>Мин. сделок<br><input id="fN" type="number" min="0" step="1"></label>
+      <label>Мин. % удачных<br><input id="fWin" type="number" min="0" max="100" step="1"></label>
+      <label>Мин. итог $<br><input id="fEq" type="number" min="0" step="1"></label>
+      <label>Макс. просадка %<br><input id="fDD" type="number" min="0" max="100" step="1"></label></div>
+      <div class="muted" style="margin-top:6px;font-size:13px">Фильтры действуют на все варианты. Сигнал и объём применяются только к той системе, у которой они есть. В «Проверке на прошлом полугодии» числа сравниваются с результатами прошлых 180 дней.</div>
+      <button class="ghost" id="copyBtn">Копировать результаты</button> <span id="copyInfo" class="muted"></span></div>
+    <div class="scroll" id="bt"></div></section>
   <section class="card wide"><h2>Журнал</h2><div id="stats" class="muted"></div><div class="scroll" id="jr"></div>
     <button class="ghost" id="jrClear">Очистить журнал</button></section>
 </div>
@@ -305,6 +319,62 @@ function backtest2(K,o){
 }
 
 let LAST2=null;
+// ===== фильтры и копирование результатов тестера =====
+let VIEW2=null;
+function getF(){const v=id=>$(id).value,num=id=>$(id).value===''?null:Number($(id).value);
+  return{iv:v('fIv'),sig:v('fSig'),vol:v('fVol'),n:num('fN'),win:num('fWin'),eq:num('fEq'),dd:num('fDD')};}
+// x — настройки варианта, o — его результаты (для проверки на прошлом полугодии — x.old)
+function okF(x,sys,o,F){
+  if(F.iv&&x.iv!==F.iv)return false;
+  if(sys===2&&(F.sig==='early'||F.sig==='cross')&&x.trig!==F.sig)return false;
+  if(sys===1&&(F.sig==='market'||F.sig==='retest')&&x.mode!==F.sig)return false;
+  if(sys===2&&F.vol&&String(x.vol)!==F.vol)return false;
+  const n=sys===2?o.n:o.trades;
+  if(F.n!=null&&!(n>=F.n))return false;
+  if(F.win!=null&&!(o.win>=F.win))return false;
+  if(F.eq!=null&&!(o.eq>=F.eq))return false;
+  if(F.dd!=null&&!(o.dd<=F.dd))return false;
+  return true;
+}
+function renderView2(){if(!LAST2)return;if(VIEW2==='oos'&&LAST2.oos)renderOOS();else if(VIEW2==='sys2')renderSys2();}
+async function copyResults(){
+  const cl=x=>x.textContent.replace(/[\u00a0\u202f]/g,'').replace(/−/g,'-').replace(/\s+/g,' ').trim(),L=[];let N=0;
+  for(const tb of $('bt').querySelectorAll('table[data-copy]')){
+    if(!tb.dataset.cont){if(L.length)L.push('');L.push(tb.dataset.copy);L.push([...tb.tHead.rows[0].cells].map(cl).join('\t'));}
+    for(const r of tb.tBodies[0].rows){L.push([...r.cells].map(cl).join('\t'));N++;}
+  }
+  const text=L.join('\r\n');
+  try{await navigator.clipboard.writeText(text);}
+  catch(e){const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e2){}ta.remove();}
+  $('copyInfo').textContent=`Скопировано: ${N} строк`;
+}
+function renderSys2(){
+  VIEW2='sys2';$('flt').style.display='';$('copyInfo').textContent='';
+  const F=getF(),rows=LAST2.rows.filter(x=>okF(x,2,x,F)),rows1=LAST2.rows1.slice().sort((a,b)=>b.eq-a.eq).filter(x=>okF(x,1,x,F));
+  const none='<div class="muted">Нет вариантов под фильтры.</div>';
+  const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}% / −${x.step/2}%</td><td>${x.n}</td><td>${x.tg}</td><td>${x.tr}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
+  const head=`<thead><tr><th>Период</th><th>Дней</th><th>MACD</th><th>Сигнал</th><th>Фильтр объёма</th><th>Цель к депозиту</th><th>Первый стоп</th><th>Шаг подтяжки</th><th>Сделок</th><th>До цели</th><th>По подтяжке</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th><th>Убытков подряд</th></tr></thead>`;
+  const tr1=x=>`<tr style="${x.trades<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.ruined?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minEq)}</td></tr>`;
+  const head1=`<thead><tr><th>Период</th><th>Дней</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Сделок</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th></tr></thead>`;
+  const T2='Система 2',T1='Система 1 на тех же днях';
+  $('bt').innerHTML=`<div class="muted">Под фильтры подходит: Система 2 — ${rows.length} из ${LAST2.rows.length}, Система 1 — ${rows1.length} из ${LAST2.rows1.length}</div>
+      <table data-copy="${T2}">${head}<tbody>${rows.slice(0,25).map(tr).join('')}</tbody></table>${rows.length?'':none}
+      ${rows.length>25?`<details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows.length} вариантов</summary><table data-copy="${T2}" data-cont="1">${head}<tbody>${rows.slice(25).map(tr).join('')}</tbody></table></details>`:''}
+      <div class="muted" style="margin-top:8px">Правила в деньгах: цель — +X% к депозиту; первый стоп — 15% от цели (5 неудач ≈ 75% цели); при +10% к депозиту стоп переносится на +5%, дальше каждые +10% подтягивают стоп ещё на 10%. Плечо не больше 100x, комиссия 0,05% на вход и выход. Стакан в истории недоступен, поэтому перенос тейк-профита по стакану здесь не проверяется. 1m — только 10 дней (иначе слишком много данных). «Шаг подтяжки +10% / −5%» — при каждых +10% к депозиту стоп поднимается и отстаёт на 5%. «До цели» — сколько сделок закрылись по цели, «По подтяжке» — сколько закрылись подтянутым стопом.</div>
+      <h3 style="margin-top:18px">Система 1 на тех же днях (риск 10%, база + прибыль серии, старт $50)</h3>
+      <table data-copy="${T1}">${head1}<tbody>${rows1.slice(0,15).map(tr1).join('')}</tbody></table>${rows1.length?'':none}
+      ${rows1.length>15?`<details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows1.length} вариантов</summary><table data-copy="${T1}" data-cont="1">${head1}<tbody>${rows1.slice(15).map(tr1).join('')}</tbody></table></details>`:''}`;
+}
+function renderOOS(){
+  VIEW2='oos';$('flt').style.display='';$('copyInfo').textContent='';
+  const F=getF(),out2=LAST2.oos.out2.filter(x=>okF(x,2,x.old,F)),out1=LAST2.oos.out1.filter(x=>okF(x,1,x.old,F));
+  const usd2=v=>v<1?'обнулён':usd(v),c=v=>v>=50?'pos':'neg',none='<div class="muted">Нет вариантов под фильтры.</div>';
+  $('bt').innerHTML=`<h3>Система 2 — 10 лучших по итогу</h3><table data-copy="Система 2 — проверка на прошлом полугодии"><thead><tr><th>Период</th><th>MACD</th><th>Сигнал</th><th>Объём</th><th>Цель</th><th>Стоп</th><th>Шаг</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
+      out2.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний':'пересечение'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}%</td><td>${x.n} / <span class="${c(x.eq)}">${usd2(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.n} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${usd2(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>${out2.length?'':none}
+      <h3 style="margin-top:18px">Система 1 — 5 лучших по итогу</h3><table data-copy="Система 1 — проверка на прошлом полугодии"><thead><tr><th>Период</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
+      out1.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades} / <span class="${c(x.eq)}">${x.ruined?'обнулён':usd(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.trades} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${x.old.ruined?'обнулён':usd(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>${out1.length?'':none}
+      <div class="muted" style="margin-top:8px">Если вариант в плюсе и на прошлом полугодии — закономерность, скорее всего, настоящая. Если там он в минусе — его успех на последних 180 днях, вероятно, случайность.</div>`;
+}
 // проверка лучших вариантов на предыдущем полугодии (те же настройки, другие данные)
 async function runOOS(){
   if(!LAST2)return;const b=$('oosBtn');b.disabled=true;
@@ -317,13 +387,8 @@ async function runOOS(){
     const rr1=(S&&S.rules&&S.rules.rr)||2;
     for(const x of top1){const bt=backtest(await K(x.iv),x.n,x.m,x.mode,rr1);out1.push({...x,old:{trades:bt.n,win:bt.win,...simCapital(bt.list,10,'house')}});}
     LAST2.oos={out2,out1,from:end-180*864e5,to:end};
-    const usd2=v=>v<1?'обнулён':usd(v),c=v=>v>=50?'pos':'neg';
     $('btInfo').textContent=`Проверка: лучшие варианты последних 180 дней на предыдущих 180 днях (${t(end-180*864e5)} — ${t(end)}), настройки без изменений`;
-    $('bt').innerHTML=`<h3>Система 2 — 10 лучших по итогу</h3><table><thead><tr><th>Период</th><th>MACD</th><th>Сигнал</th><th>Объём</th><th>Цель</th><th>Стоп</th><th>Шаг</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
-      out2.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний':'пересечение'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}%</td><td>${x.n} / <span class="${c(x.eq)}">${usd2(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.n} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${usd2(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>
-      <h3 style="margin-top:18px">Система 1 — 5 лучших по итогу</h3><table><thead><tr><th>Период</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Последние 180 дн.: сделок / итог / просадка</th><th>Прошлые 180 дн.: сделок / удачных / итог / просадка</th></tr></thead><tbody>${
-      out1.map(x=>`<tr><td>${x.iv.toUpperCase()}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades} / <span class="${c(x.eq)}">${x.ruined?'обнулён':usd(x.eq)}</span> / −${f(x.dd,0)}%</td><td>${x.old.trades} / ${f(x.old.win,0)}% / <span class="${c(x.old.eq)}">${x.old.ruined?'обнулён':usd(x.old.eq)}</span> / −${f(x.old.dd,0)}%</td></tr>`).join('')}</tbody></table>
-      <div class="muted" style="margin-top:8px">Если вариант в плюсе и на прошлом полугодии — закономерность, скорее всего, настоящая. Если там он в минусе — его успех на последних 180 днях, вероятно, случайность.</div>`;
+    renderOOS();
   }catch(e){$('btInfo').textContent='Ошибка проверки: '+e.message;}
   b.disabled=false;
 }
@@ -360,14 +425,7 @@ async function runSys2(){
     LAST2={rows,rows1:rows1.slice(),oos:null};$('oosBtn').disabled=$('csvBtn').disabled=false;
     const plus=rows.filter(x=>x.n>=10&&x.eq>50).length;
     $('btInfo').textContent=`Система 2 · проверено ${rows.length} вариантов · с прибылью (от 10 сделок): ${plus} · старт $50 · сортировка по проценту удачных сделок`;
-    const tr=x=>`<tr style="${x.n<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.fa}/${x.sl}/${x.sg}</td><td>${x.trig==='early'?'ранний (столбики убывают)':'пересечение линий'}</td><td>${x.vol?'да':'нет'}</td><td>+${x.tgt}%</td><td>${x.atrM} ATR</td><td>+${x.step}% / −${x.step/2}%</td><td>${x.n}</td><td>${x.tg}</td><td>${x.tr}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.eq<1?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minD)}</td><td>${x.maxS}</td></tr>`;
-    const head=`<thead><tr><th>Период</th><th>Дней</th><th>MACD</th><th>Сигнал</th><th>Фильтр объёма</th><th>Цель к депозиту</th><th>Первый стоп</th><th>Шаг подтяжки</th><th>Сделок</th><th>До цели</th><th>По подтяжке</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th><th>Убытков подряд</th></tr></thead>`;
-    $('bt').innerHTML=`<table>${head}<tbody>${rows.slice(0,25).map(tr).join('')}</tbody></table>
-      <details style="margin-top:8px"><summary style="cursor:pointer">Показать все ${rows.length} вариантов</summary><table>${head}<tbody>${rows.slice(25).map(tr).join('')}</tbody></table></details>
-      <div class="muted" style="margin-top:8px">Правила в деньгах: цель — +X% к депозиту; первый стоп — 15% от цели (5 неудач ≈ 75% цели); при +10% к депозиту стоп переносится на +5%, дальше каждые +10% подтягивают стоп ещё на 10%. Плечо не больше 100x, комиссия 0,05% на вход и выход. Стакан в истории недоступен, поэтому перенос тейк-профита по стакану здесь не проверяется. 1m — только 10 дней (иначе слишком много данных). «Шаг подтяжки +10% / −5%» — при каждых +10% к депозиту стоп поднимается и отстаёт на 5%. «До цели» — сколько сделок закрылись по цели, «По подтяжке» — сколько закрылись подтянутым стопом.</div>
-      <h3 style="margin-top:18px">Система 1 на тех же днях (риск 10%, база + прибыль серии, старт $50)</h3>
-      <table><thead><tr><th>Период</th><th>Дней</th><th>EMA</th><th>Вход</th><th>Стоп</th><th>Сделок</th><th>Удачных</th><th>Итог с $50</th><th>Просадка</th><th>Минимум</th></tr></thead><tbody>${
-      rows1.sort((a,b)=>b.eq-a.eq).slice(0,15).map(x=>`<tr style="${x.trades<10?'opacity:.5':''}"><td>${x.iv.toUpperCase()}</td><td>${f(x.days,0)}</td><td>${x.n}</td><td>${x.mode==='market'?'по рынку':'лимитка'}</td><td>${x.m} ATR</td><td>${x.trades}</td><td>${f(x.win,0)}%</td><td class="${x.eq>=50?'pos':'neg'}">${x.ruined?'обнулён':usd(x.eq)}</td><td class="neg">−${f(x.dd,0)}%</td><td>${usd(x.minEq)}</td></tr>`).join('')}</tbody></table>`;
+    renderSys2();
   }catch(e){$('btInfo').textContent='Ошибка теста: '+e.message;}
   b.disabled=false;
 }
@@ -399,9 +457,28 @@ async function history24(){
   }
   rows.sort((a,b)=>b.t-a.t);
   $('histInfo').textContent=`EMA ${n} · сигналов: `+counts.join(' · ')+` · обновлено ${t(Date.now())}`;
+  HROWS=rows;renderHist();
+}
+// фильтр по таймфрейму (запоминается) и выгрузка CSV истории сигналов
+let HROWS=[],HTF='';try{HTF=localStorage.getItem('histTf')||'';}catch(e){}
+const histRows=()=>HTF?HROWS.filter(r=>r.iv===HTF):HROWS;
+function renderHist(){
+  const ord=v=>H_PERIODS.findIndex(p=>p[0]===v),tfs=[...new Set(HROWS.map(r=>r.iv))];
+  if(HTF&&!tfs.includes(HTF))tfs.push(HTF);tfs.sort((a,b)=>ord(a)-ord(b));
+  $('histTf').innerHTML='<option value="">Все</option>'+tfs.map(v=>`<option value="${esc(v)}">${esc(v.toUpperCase())}</option>`).join('');$('histTf').value=HTF;
+  const rows=histRows();
   $('hist').innerHTML=rows.length?`<table><thead><tr><th>Свеча закрыта</th><th>Период</th><th>Сигнал</th><th>Закрытие</th><th>Уровень пробоя</th></tr></thead><tbody>${
     rows.slice(0,150).map(r=>`<tr><td>${t(r.t)}</td><td>${r.iv.toUpperCase()}</td><td class="${r.side==='LONG'?'long':'short'}">${r.side}</td><td>${f(r.close,1)}</td><td>${f(r.lvl,1)}</td></tr>`).join('')}</tbody></table>`
+    :HROWS.length?`<div class="muted">На периоде ${esc(HTF.toUpperCase())} за последние сутки сигналов не было.</div>`
     :'<div class="muted">За последние сутки сигналов не было ни на одном периоде.</div>';
+}
+function histCSV(){
+  const n=v=>v==null?'':String(Math.round(v*100)/100).replace('.',','),q=v=>`"${String(v).replace(/"/g,'""')}"`,p=v=>String(v).padStart(2,'0');
+  const d=ms=>{const x=new Date(ms);return `${p(x.getDate())}.${p(x.getMonth()+1)}.${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`;};
+  const L=[['Свеча закрыта','Период','Сигнал','Закрытие','Уровень пробоя'].map(q).join(';')];
+  for(const r of histRows())L.push([q(d(r.t)),q(r.iv.toUpperCase()),q(r.side),n(r.close),n(r.lvl)].join(';'));
+  const now=new Date(),a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L.join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  a.download=`or-hashefa-signals-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}.csv`;document.body.appendChild(a);a.click();a.remove();
 }
 let BUSY=false;
 async function load(strict){
@@ -492,21 +569,35 @@ function render(){
     if(can)$('openBtn').onclick=()=>openTrade(`Поставить лимитку ${p.side} ${p.qty} BTC по ${f(p.price,1)} (до ${t(p.gtd)})?\nСтоп ${f(p.stop,1)}, цель ${f(p.tp,1)}, риск ${usd(p.risk)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
   } else $('plan').innerHTML=`<div class="muted">${esc(s.why||'Ждём сигнала на закрытии 4-часовой свечи.')}</div>`;
   const ps=a&&a.pos;
+  // цена сейчас, расстояния до стопа/тейка, цель в $ и в % от рабочего капитала
+  const dist=(px,lv)=>px&&lv?`${usd(Math.abs(px-lv))} · ${f(Math.abs(px-lv)/px*100,2)}%`:'—';
+  const goal=v=>v==null||!isFinite(v)?'—':usd(v)+(s.capital?` · ${f(v/s.capital*100,1)}% капитала`:'');
   if(ps){
     const sl=a.algos.find(x=>x.type==='STOP_MARKET'),tp=a.algos.find(x=>x.type==='TAKE_PROFIT_MARKET');
+    const jo=(s.journal||[]).find(r=>r.status==='OPEN'),dir=ps.amt>0?1:-1,qa=Math.abs(ps.amt),px=s.price||ps.mark;
+    const stopP=sl?sl.trigger:jo&&jo.stop,tpP=tp?tp.trigger:jo&&jo.tp,pl=(lv,on)=>lv&&!on?' (по плану, на бирже нет)':'';
     $('pos').innerHTML=`<div class="big ${ps.amt>0?'long':'short'}">${ps.amt>0?'LONG':'SHORT'} ${Math.abs(ps.amt)} BTC</div>
-      <dl><dt>Вход</dt><dd>${f(ps.entry,1)}</dd><dt>Марк-цена</dt><dd>${f(ps.mark,1)}</dd>
-      <dt>Нереализ. P&amp;L</dt><dd class="${cls(ps.upnl)}">${usd(ps.upnl)}</dd>
-      <dt>Стоп на бирже</dt><dd>${sl?f(sl.trigger,1):'<span class="neg">НЕТ</span>'}</dd>
-      <dt>Тейк на бирже</dt><dd>${tp?f(tp.trigger,1):'нет'}</dd><dt>Ликвидация</dt><dd>${ps.liq?f(ps.liq,1):'—'}</dd></dl>
+      <dl><dt>Цена BTC сейчас</dt><dd>${f(px,1)}</dd>
+      <dt>Вход</dt><dd>${f(ps.entry,1)}</dd><dt>Марк-цена</dt><dd>${f(ps.mark,1)}</dd>
+      <dt>Плавающий результат</dt><dd class="${cls(ps.upnl)}">${usd(ps.upnl)}</dd>
+      <dt>Стоп на бирже</dt><dd>${sl?f(sl.trigger,1):'<span class="neg">НЕТ</span>'+(stopP?` (по плану ${f(stopP,1)})`:'')}</dd>
+      <dt>Тейк на бирже</dt><dd>${tp?f(tp.trigger,1):'нет'+(tpP?` (по плану ${f(tpP,1)})`:'')}</dd>
+      <dt>Цель по прибыли (без комиссии)</dt><dd class="pos">${tpP?goal(dir*(tpP-ps.entry)*qa):'—'}</dd>
+      <dt>Риск до стопа</dt><dd class="${stopP?cls(dir*(stopP-ps.entry)):''}">${stopP?usd(dir*(stopP-ps.entry)*qa):'—'}</dd>
+      <dt>До стопа${pl(stopP,sl)}</dt><dd>${dist(px,stopP)}</dd><dt>До тейка${pl(tpP,tp)}</dt><dd>${dist(px,tpP)}</dd>
+      <dt>Ликвидация</dt><dd>${ps.liq?f(ps.liq,1):'—'}</dd></dl>
       ${sl?'':'<div class="alert">На бирже нет стопа — позиция не защищена.</div>'}
       <button class="ghost" id="closeBtn">Закрыть по рынку</button>`;
     $('closeBtn').onclick=closePos;
   } else if(s.pending){
     const q=s.pending;
     $('pos').innerHTML=`<div class="big ${q.side==='LONG'?'long':'short'}">Ждём исполнения</div>
-      <dl><dt>Лимитка</dt><dd>${q.side} ${q.qty} BTC по ${f(q.entry,1)}</dd><dt>Действует до</dt><dd>${t(q.gtd)}</dd>
-      <dt>Стоп на бирже</dt><dd>${f(q.stop,1)}</dd><dt>Тейк на бирже</dt><dd>${f(q.tp,1)}</dd><dt>Риск</dt><dd class="neg">${usd(q.risk_usd)}</dd></dl>
+      <dl><dt>Цена BTC сейчас</dt><dd>${f(s.price,1)}</dd>
+      <dt>Лимитка</dt><dd>${q.side} ${q.qty} BTC по ${f(q.entry,1)}</dd><dt>Действует до</dt><dd>${t(q.gtd)}</dd>
+      <dt>Стоп на бирже</dt><dd>${f(q.stop,1)}</dd><dt>Тейк на бирже</dt><dd>${f(q.tp,1)}</dd>
+      <dt>Цель по прибыли (без комиссии)</dt><dd class="pos">${goal(Math.abs(q.tp-q.entry)*q.qty)}</dd>
+      <dt>Риск до стопа</dt><dd class="neg">${usd(q.risk_usd)}</dd>
+      <dt>До стопа</dt><dd>${dist(s.price,q.stop)}</dd><dt>До тейка</dt><dd>${dist(s.price,q.tp)}</dd></dl>
       <div class="muted">Если цена не вернётся к уровню до указанного времени, заявка снимется сама.</div>
       <button class="ghost" id="cancelLimitBtn">Снять заявку</button>`;
     $('cancelLimitBtn').onclick=cancelLimit;
@@ -535,8 +626,10 @@ document.addEventListener('click',()=>{try{AC=AC||new (window.AudioContext||wind
 $('pwBtn').onclick=login;$('pw').onkeydown=e=>{if(e.key==='Enter')login();};
 $('btBtn').onclick=runBacktest;$('btAllBtn').onclick=runAllTests;$('capBtn').onclick=runCapital;$('m2Btn').onclick=runSys2;$('oosBtn').onclick=runOOS;$('csvBtn').onclick=downloadCSV;
 $('sysSel').value=localStorage.getItem('sysSel')||'1';
-const sysShow=()=>{const v=$('sysSel').value;$('sys1Btns').style.display=v==='1'?'':'none';$('sys2Btns').style.display=v==='2'?'':'none';localStorage.setItem('sysSel',v);};
+const sysShow=()=>{const v=$('sysSel').value;$('sys1Btns').style.display=v==='1'?'':'none';$('sys2Btns').style.display=v==='2'?'':'none';$('flt').style.display=v==='2'&&VIEW2?'':'none';localStorage.setItem('sysSel',v);};
 $('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
+$('histTf').onchange=()=>{HTF=$('histTf').value;try{localStorage.setItem('histTf',HTF);}catch(e){}renderHist();};$('histCsv').onclick=histCSV;
+for(const id of ['fIv','fSig','fVol','fN','fWin','fEq','fDD'])$(id).oninput=renderView2;$('copyBtn').onclick=copyResults;
 projectLook();
 if(PW)login();else logout();
 </script>
