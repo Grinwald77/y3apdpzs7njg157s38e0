@@ -60,6 +60,7 @@ th:first-child,td:first-child{text-align:left}
   <select id="ema" aria-label="Период EMA" style="font:inherit;font-weight:700;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)">
     <option value="20">EMA 20</option><option value="50">EMA 50</option><option value="100">EMA 100</option><option value="200">EMA 200</option>
   </select>
+  <span id="sysLabel" class="badge" style="display:none;background:var(--chip);color:var(--ink)"></span>
   <span id="mode" class="badge">…</span>
   <span class="muted" id="hdr"></span>
 </header>
@@ -488,10 +489,39 @@ async function load(strict){
   catch(e){if(strict)throw e;$('err').style.display='block';$('err').textContent='Ошибка обновления: '+e.message;}
 }
 const lock=on=>{BUSY=on;document.querySelectorAll('#app button').forEach(b=>b.disabled=on);};
+// Система 2: вход по рынку → стоп → тейк → трейлинг. Без стопа позицию не оставляем.
+async function openTrade2(prep){
+  let placed=false,sr=null;
+  try{
+    for(const q of prep.steps){
+      const r=await send(q);
+      if(q.check==='oneway'){if(bad(r))throw new Error(bmsg(r));if(r.body.dualSidePosition)throw new Error('включён Hedge Mode — переключите режим позиций на One-way в Binance');continue;}
+      if(bad(r)){if(q.allow&&q.allow.includes(r.body&&r.body.code))continue;throw new Error(bmsg(r));}
+    }
+    placed=true;                                   // позиция открыта по рынку
+    sr=await send(prep.stopReq);
+    if(bad(sr)){
+      const cr=await send(prep.closeReq);await api('/api/open/abort').catch(()=>{});
+      alert('Стоп не выставился ('+bmsg(sr)+').\n'+(bad(cr)?'ВНИМАНИЕ: закрыть позицию по рынку не удалось ('+bmsg(cr)+') — закройте её вручную в Binance!':'Позиция закрыта по рынку, сделки нет.'));
+      return;
+    }
+    const tr=await send(prep.tpReq),tl=await send(prep.trailReq),p=prep.plan;
+    await api('/api/open/algos',{ids:[sr.body.algoId,bad(tr)?null:tr.body.algoId,bad(tl)?null:tl.body.algoId]});
+    alert(`Позиция ${p.side} ${p.qty} BTC открыта по рынку.\nСтоп ${f(p.stop,1)} на бирже.`+
+      (bad(tr)?`\n\nТейк не выставился: ${bmsg(tr)}. Цель ${f(p.tp,1)} — следите вручную.`:`\nТейк ${f(p.tp,1)} на бирже.`)+
+      (bad(tl)?`\n\nТрейлинг не выставился: ${bmsg(tl)}. Позицию держат стоп и тейк.`:`\nТрейлинг: включится при ${f(p.activatePrice,1)}, отставание ${f(p.callbackRate,1)}%.`));
+  }catch(e){
+    if(!placed){await api('/api/open/abort').catch(()=>{});alert('Сделка не открыта: '+e.message);}
+    else if(!sr){const cr=await send(prep.closeReq).catch(()=>null);await api('/api/open/abort').catch(()=>{});
+      alert('Ошибка сразу после входа: '+e.message+(!cr||bad(cr)?'\n\nВНИМАНИЕ: позицию закрыть не удалось — проверьте Binance!':'\n\nПозиция закрыта по рынку.'));}
+    else alert('Ошибка после постановки стопа: '+e.message+'\nСтоп на бирже стоит. Проверьте тейк и трейлинг в Binance → «Открытые ордера».');
+  }
+}
 async function openTrade(msg){
   if(!confirm(msg))return;lock(true);let placed=false,prep=null;
   try{
     prep=await api('/api/open/prepare',await gather());if(!prep.ok)throw new Error(prep.error);
+    if(prep.system===2){await openTrade2(prep);lock(false);load();return;}
     for(const q of prep.steps){
       const r=await send(q);
       if(q.check==='oneway'){if(bad(r))throw new Error(bmsg(r));if(r.body.dualSidePosition)throw new Error('включён Hedge Mode — переключите режим позиций на One-way в Binance');continue;}
@@ -506,7 +536,7 @@ async function openTrade(msg){
       alert(`Лимитная заявка ${p.side} ${p.qty} BTC стоит по ${f(p.price,1)} до ${t(p.gtd)}.\nСтоп ${f(p.stop,1)} и цель ${f(p.tp,1)} уже на бирже.`+(bad(tr)?`\n\nТейк-профит не выставился: ${bmsg(tr)}. Цель ${f(p.tp,1)} — следите вручную.`:''));}
   }catch(e){
     if(placed&&prep){const r=await send(prep.cancelReq);await api('/api/open/abort').catch(()=>{});alert('Ошибка после постановки заявки: '+e.message+(bad(r)?'\n\nВНИМАНИЕ: заявку снять не удалось — проверьте ордера на Binance!':'\n\nЗаявка снята.'));}
-    else{await api('/api/open/abort').catch(()=>{});alert('Заявка не поставлена: '+e.message);}
+    else{await api('/api/open/abort').catch(()=>{});alert((S&&S.system===2?'Сделка не открыта: ':'Заявка не поставлена: ')+e.message);}
   }
   lock(false);load();
 }
@@ -529,7 +559,8 @@ function notify(){
   setFav(side?'#1F9D55':'#C0392B');
   document.title=S.price?Math.round(S.price).toLocaleString('ru-RU'):'…';
   const key=side?side+g.candle_close_time+IV+EMA:null;
-  if(key&&key!==LAST_SIG){
+  if(key&&key!==LAST_SIG&&S.system===2){if(LAST_SIG!==null)tink();}
+  else if(key&&key!==LAST_SIG){
     if(LAST_SIG!==null)tink();
     const p=S.plan;
     const text=`${side==='LONG'?'🟢 LONG':'🔴 SHORT'} · BTC ${IV.toUpperCase()} · EMA ${EMA}\n`+
@@ -546,8 +577,23 @@ function render(){
   const a=s.account;
   $('hdr').textContent=`${s.symbol} · плечо ${s.leverage}x · `+(a?`баланс ${usd(a.balance)} · рабочий капитал ${usd(s.capital)}`:'ключ API не задан')+` · обновлено ${t(s.updated)}`;
   $('err').style.display=s.error?'block':'none';$('err').textContent=s.error?'Ошибка: '+s.error:'';
+  const sys2=s.system===2;
+  // Система 2: период зафиксирован на 2h, выбор периода и EMA скрыт
+  $('iv').style.display=sys2?'none':'';$('ema').style.display=sys2?'none':'';
+  $('sysLabel').style.display=sys2?'':'none';$('sysLabel').textContent=s.system_label||'';
+  $('ivTitle').textContent=sys2?'2H':IV.toUpperCase();
   const g=s.signal;
-  if(g){
+  if(g&&g.system===2){
+    const left=Math.max(0,s.next_close-Date.now()),hh=Math.floor(left/36e5),mm=Math.floor(left%36e5/6e4),h=g.hist||[];
+    $('sig').innerHTML=`<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
+      <div class="muted">${esc(g.reason||'')}</div>
+      <dl><dt>Закрытие свечи</dt><dd>${g.close!=null?f(g.close,1):'—'}</dd>
+      <dt>Гистограмма MACD (3 свечи)</dt><dd>${h.length?h.map(x=>x==null?'—':f(x,1)).join(' → '):'—'}</dd>
+      <dt>Объём свечи</dt><dd class="${g.vol_ok?'pos':''}">${g.volume!=null?f(g.volume,0):'—'}</dd>
+      <dt>Средний объём (20)</dt><dd>${g.vol_avg!=null?f(g.vol_avg,0):'—'}</dd>
+      <dt>ATR 14</dt><dd>${g.atr!=null?f(g.atr,1):'—'}</dd>
+      <dt>Свеча закрыта</dt><dd>${g.candle_close_time?t(g.candle_close_time):'—'}</dd><dt>Следующая через</dt><dd>${hh} ч ${mm} мин</dd></dl>`;
+  } else if(g){
     const left=Math.max(0,s.next_close-Date.now()),hh=Math.floor(left/36e5),mm=Math.floor(left%36e5/6e4);
     $('sig').innerHTML=`<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
       <div class="muted">${esc(g.reason)}</div>
@@ -556,7 +602,22 @@ function render(){
       <dt>Свеча закрыта</dt><dd>${t(g.candle_close_time)}</dd><dt>Следующая через</dt><dd>${hh} ч ${mm} мин</dd></dl>`;
   }
   const p=s.plan;
-  if(p){
+  if(p&&p.system===2){
+    const can=s.tradable;
+    $('plan').innerHTML=`<dl><dt>Направление</dt><dd class="${p.side==='LONG'?'long':'short'}">${p.side}</dd>
+      <dt>Вход по рынку ≈</dt><dd>${f(p.price,1)}</dd>
+      <dt>Стоп (1×ATR)</dt><dd>${f(p.stop,1)}</dd><dt>Тейк (+${p.target_pct}% капитала)</dt><dd>${f(p.tp,1)}</dd>
+      <dt>Объём</dt><dd>${p.qty} BTC (${usd(p.notional)})</dd><dt>Залог при ${s.leverage}x</dt><dd>${usd(p.margin)}</dd>
+      <dt>Цель по прибыли</dt><dd class="pos">${usd(p.target_usd)} · ${f(p.target_pct,0)}% капитала</dd>
+      <dt>Риск до стопа</dt><dd class="neg">${usd(p.risk_usd)} · ${f(p.risk_pct,1)}%</dd>
+      <dt>Трейлинг включается при</dt><dd>${f(p.activatePrice,1)} (+25% капитала)</dd>
+      <dt>Отставание трейлинга</dt><dd>${f(p.callbackRate,1)}%${p.callback_clamped?' <span class="neg">(ограничено Binance)</span>':''}</dd>
+      <dt>Ликвидация ≈</dt><dd>${p.liq?f(p.liq,1):'нет при этом балансе'}</dd></dl>
+      ${(p.notes||[]).map(n=>`<div class="note">${esc(n)}</div>`).join('')}
+      ${can?'':`<div class="alert">Сделка недоступна: ${esc(s.why)}</div>`}
+      <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Открыть ${p.side} по рынку</button>`;
+    if(can)$('openBtn').onclick=()=>openTrade(`Открыть ${p.side} ${p.qty} BTC по рынку (≈ ${f(p.price,1)})?\nСтоп ${f(p.stop,1)}, тейк ${f(p.tp,1)}, трейлинг с ${f(p.activatePrice,1)} с отставанием ${f(p.callbackRate,1)}%.\nРиск ${usd(p.risk_usd)}, цель ${usd(p.target_usd)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
+  } else if(p){
     const can=s.tradable;
     $('plan').innerHTML=`<dl><dt>Направление</dt><dd class="${p.side==='LONG'?'long':'short'}">${p.side}</dd>
       <dt>Вход — лимитка на уровне пробоя</dt><dd>${f(p.price,1)}</dd><dt>Заявка действует до</dt><dd>${t(p.gtd)}</dd><dt>Стоп (${s.rules.atr_mult}×ATR)</dt><dd>${f(p.stop,1)}</dd>
@@ -567,13 +628,14 @@ function render(){
       ${can?'':`<div class="alert">Сделка недоступна: ${esc(s.why)}</div>`}
       <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Поставить лимитку ${p.side}</button>`;
     if(can)$('openBtn').onclick=()=>openTrade(`Поставить лимитку ${p.side} ${p.qty} BTC по ${f(p.price,1)} (до ${t(p.gtd)})?\nСтоп ${f(p.stop,1)}, цель ${f(p.tp,1)}, риск ${usd(p.risk)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
-  } else $('plan').innerHTML=`<div class="muted">${esc(s.why||'Ждём сигнала на закрытии 4-часовой свечи.')}</div>`;
+  } else $('plan').innerHTML=`<div class="muted">${esc(s.why||(sys2?'Ждём сигнала на закрытии 2-часовой свечи.':'Ждём сигнала на закрытии свечи.'))}</div>`;
   const ps=a&&a.pos;
   // цена сейчас, расстояния до стопа/тейка, цель в $ и в % от рабочего капитала
   const dist=(px,lv)=>px&&lv?`${usd(Math.abs(px-lv))} · ${f(Math.abs(px-lv)/px*100,2)}%`:'—';
   const goal=v=>v==null||!isFinite(v)?'—':usd(v)+(s.capital?` · ${f(v/s.capital*100,1)}% капитала`:'');
   if(ps){
-    const sl=a.algos.find(x=>x.type==='STOP_MARKET'),tp=a.algos.find(x=>x.type==='TAKE_PROFIT_MARKET');
+    const sl=a.algos.find(x=>x.type==='STOP_MARKET'),tp=a.algos.find(x=>x.type==='TAKE_PROFIT_MARKET'),tr=a.algos.find(x=>x.type==='TRAILING_STOP_MARKET');
+    const P2=s.position&&s.position.system===2?s.position:null;
     const jo=(s.journal||[]).find(r=>r.status==='OPEN'),dir=ps.amt>0?1:-1,qa=Math.abs(ps.amt),px=s.price||ps.mark;
     const stopP=sl?sl.trigger:jo&&jo.stop,tpP=tp?tp.trigger:jo&&jo.tp,pl=(lv,on)=>lv&&!on?' (по плану, на бирже нет)':'';
     $('pos').innerHTML=`<div class="big ${ps.amt>0?'long':'short'}">${ps.amt>0?'LONG':'SHORT'} ${Math.abs(ps.amt)} BTC</div>
@@ -585,10 +647,19 @@ function render(){
       <dt>Цель по прибыли (без комиссии)</dt><dd class="pos">${tpP?goal(dir*(tpP-ps.entry)*qa):'—'}</dd>
       <dt>Риск до стопа</dt><dd class="${stopP?cls(dir*(stopP-ps.entry)):''}">${stopP?usd(dir*(stopP-ps.entry)*qa):'—'}</dd>
       <dt>До стопа${pl(stopP,sl)}</dt><dd>${dist(px,stopP)}</dd><dt>До тейка${pl(tpP,tp)}</dt><dd>${dist(px,tpP)}</dd>
+      ${P2?`<dt>Система</dt><dd>2 · MACD 12/26/9 · 2H</dd>
+      <dt>Цель системы</dt><dd class="pos">${P2.target_usd!=null?usd(P2.target_usd)+' · '+f(P2.target_pct,0)+'% капитала':'—'}</dd>
+      <dt>Трейлинг на бирже</dt><dd>${tr?'да':'<span class="neg">нет</span>'}</dd>
+      <dt>Включается при</dt><dd>${P2.activatePrice?f(P2.activatePrice,1):'—'}</dd>
+      <dt>Отставание</dt><dd>${P2.callbackRate?f(P2.callbackRate,1)+'%':'—'}</dd>
+      <dt>Состояние трейлинга</dt><dd>${!P2.activatePrice?'—':(dir>0?px>=P2.activatePrice:px<=P2.activatePrice)?'<span class="pos">включён — тянется за ценой</span>':'ждёт цены '+f(P2.activatePrice,1)+' ('+dist(px,P2.activatePrice)+')'}</dd>`:''}
       <dt>Ликвидация</dt><dd>${ps.liq?f(ps.liq,1):'—'}</dd></dl>
       ${sl?'':'<div class="alert">На бирже нет стопа — позиция не защищена.</div>'}
+      ${P2&&!tr&&sl?'<div class="note">Трейлинга на бирже нет — позицию держат стоп и тейк.</div>':''}
       <button class="ghost" id="closeBtn">Закрыть по рынку</button>`;
     $('closeBtn').onclick=closePos;
+  } else if(s.pending&&sys2){
+    $('pos').innerHTML='<div class="muted">Сделка открывается…</div>';
   } else if(s.pending){
     const q=s.pending;
     $('pos').innerHTML=`<div class="big ${q.side==='LONG'?'long':'short'}">Ждём исполнения</div>
