@@ -75,6 +75,11 @@ th:first-child,td:first-child{text-align:left}
   <section class="card"><h2>План сделки</h2><div id="plan"></div></section>
   <section class="card"><h2>Позиция</h2><div id="pos"></div></section>
   <section class="card"><h2>Риск-контроль</h2><div id="lock"></div></section>
+  <section class="card" id="testCard" style="display:none"><h2>Тестовый сигнал (только демо)</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center"><select id="testSide"><option>SHORT</option><option>LONG</option></select>
+    <label>Время (Израиль) <input id="testTime" type="time" value="17:48"></label></div>
+    <div style="display:flex;gap:8px"><button class="ghost" id="testGo">Запланировать</button><button class="ghost" id="testCancel">Отменить</button></div>
+    <div id="testStat" class="muted" style="margin-top:6px"></div></section>
   <section class="card wide"><details id="histBox"><summary style="cursor:pointer;list-style:none"><h2 style="display:inline">История сигналов за сутки ▾</h2>
     <div id="histInfo" class="muted"></div></summary><div class="fl" style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:8px 0"><label>Таймфрейм <select id="histTf"><option value="">Все</option></select></label><button class="ghost" id="histCsv" style="margin-top:0">Скачать CSV</button></div><div class="scroll" id="hist"></div></details></section>
   <section class="card wide"><h2>Тестер по истории</h2>
@@ -435,6 +440,19 @@ async function clearJournal(){
   const r=await api('/api/journal/clear');if(!r.ok)alert('Ошибка: '+r.error);load();
 }
 let HTIMER=null,HOLD_TIMER=null;
+// ---------- тестовый сигнал (только демо) ----------
+const ilT=ms=>ms?new Date(ms).toLocaleTimeString('ru-RU',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'}):'—';
+function ilToUtc(hhmm){const [h,m]=hhmm.split(':').map(Number),n=new Date();
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(n).map(x=>[x.type,x.value]));
+  const off=Date.UTC(+p.year,p.month-1,+p.day,+p.hour,+p.minute)-Math.floor(n.getTime()/6e4)*6e4;
+  let at=Date.UTC(+p.year,p.month-1,+p.day,h,m)-off;if(at<Date.now()-6e4)at+=864e5;return at;}
+function testShow(t){$('testStat').textContent=!t?'Тест не запланирован.':t.fired?`${t.side} сработал в ${ilT(t.fired_at)}, вход доступен до ${ilT(t.until)}`+(Date.now()>=t.until?' (истёк)':''):`${t.side} запланирован на ${ilT(t.at)} (по Израилю), ждёт запуска`;}
+async function testRender(s){const live=s.mode==='LIVE';$('testCard').style.display=live?'none':'';if(live)return;
+  try{const r=await api('/api/test/get',{});if(r.ok)testShow(r.test);else $('testStat').textContent=r.error;}catch(e){}}
+async function testAct(path,body){try{const r=await api(path,body);if(!r.ok)return alert(r.error);testShow(r.test||null);}catch(e){alert(e.message);}}
+document.addEventListener('DOMContentLoaded',()=>{
+  $('testGo').onclick=()=>{const v=$('testTime').value;if(!v)return alert('Укажите время');testAct('/api/test/schedule',{side:$('testSide').value,at:ilToUtc(v)});};
+  $('testCancel').onclick=()=>testAct('/api/test/cancel',{});});
 const H_PERIODS=[['1m',1,1500],['15m',15,400],['1h',60,400],['4h',240,400]];
 function emaArr(v,n){const k=2/(n+1);let e=v.slice(0,n).reduce((a,b)=>a+b,0)/n;const o=Array(n-1).fill(null).concat([e]);for(const x of v.slice(n)){e=x*k+e*(1-k);o.push(e);}return o;}
 async function history24(){
@@ -585,7 +603,7 @@ function render(){
   const g=s.signal;
   if(g&&g.system===2){
     const left=Math.max(0,s.next_close-Date.now()),hh=Math.floor(left/36e5),mm=Math.floor(left%36e5/6e4),h=g.hist||[];
-    $('sig').innerHTML=`<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
+    $('sig').innerHTML=`${g.test?`<div class="big">🧪 ТЕСТ</div><div class="note">тестовый сигнал действует до ${ilT(g.test_until)} · осталось <b id="holdLeft"></b></div>`:''}<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
       <div class="muted">${esc(g.reason||'')}</div>
       ${g.held?`<div class="note">по данным ${esc(g.hold_source||'')}, держится до ${new Date(g.hold_until).toLocaleTimeString('ru-RU',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'})} · осталось <b id="holdLeft"></b></div>`:''}
       <dl><dt>Закрытие свечи</dt><dd>${g.close!=null?f(g.close,1):'—'}</dd>
@@ -604,7 +622,8 @@ function render(){
   }
   const p=s.plan;
   clearInterval(HOLD_TIMER);HOLD_TIMER=null;
-  const held=g&&g.held?g.hold_until:0;
+  const held=g&&g.held?g.hold_until:g&&g.test?g.test_until:0;
+  testRender(s);
   if(p&&p.system===2&&held&&Date.now()>=held)$('plan').innerHTML=`<div class="muted">Время входа по сигналу фоновой проверки истекло.</div>`;
   else if(p&&p.system===2){
     const can=s.tradable;
