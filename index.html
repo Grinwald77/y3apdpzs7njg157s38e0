@@ -434,7 +434,7 @@ async function clearJournal(){
   if(!confirm('Удалить все закрытые сделки из журнала? Открытая позиция (если есть) останется.'))return;
   const r=await api('/api/journal/clear');if(!r.ok)alert('Ошибка: '+r.error);load();
 }
-let HTIMER=null;
+let HTIMER=null,HOLD_TIMER=null;
 const H_PERIODS=[['1m',1,1500],['15m',15,400],['1h',60,400],['4h',240,400]];
 function emaArr(v,n){const k=2/(n+1);let e=v.slice(0,n).reduce((a,b)=>a+b,0)/n;const o=Array(n-1).fill(null).concat([e]);for(const x of v.slice(n)){e=x*k+e*(1-k);o.push(e);}return o;}
 async function history24(){
@@ -587,6 +587,7 @@ function render(){
     const left=Math.max(0,s.next_close-Date.now()),hh=Math.floor(left/36e5),mm=Math.floor(left%36e5/6e4),h=g.hist||[];
     $('sig').innerHTML=`<div class="big ${g.side==='LONG'?'long':g.side==='SHORT'?'short':''}">${g.side||'Нет сигнала'}</div>
       <div class="muted">${esc(g.reason||'')}</div>
+      ${g.held?`<div class="note">по данным ${esc(g.hold_source||'')}, держится до ${new Date(g.hold_until).toLocaleTimeString('ru-RU',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'})} · осталось <b id="holdLeft"></b></div>`:''}
       <dl><dt>Закрытие свечи</dt><dd>${g.close!=null?f(g.close,1):'—'}</dd>
       <dt>Гистограмма MACD (3 свечи)</dt><dd>${h.length?h.map(x=>x==null?'—':f(x,1)).join(' → '):'—'}</dd>
       <dt>Объём свечи</dt><dd class="${g.vol_ok?'pos':''}">${g.volume!=null?f(g.volume,0):'—'}</dd>
@@ -602,7 +603,10 @@ function render(){
       <dt>Свеча закрыта</dt><dd>${t(g.candle_close_time)}</dd><dt>Следующая через</dt><dd>${hh} ч ${mm} мин</dd></dl>`;
   }
   const p=s.plan;
-  if(p&&p.system===2){
+  clearInterval(HOLD_TIMER);HOLD_TIMER=null;
+  const held=g&&g.held?g.hold_until:0;
+  if(p&&p.system===2&&held&&Date.now()>=held)$('plan').innerHTML=`<div class="muted">Время входа по сигналу фоновой проверки истекло.</div>`;
+  else if(p&&p.system===2){
     const can=s.tradable;
     $('plan').innerHTML=`<dl><dt>Направление</dt><dd class="${p.side==='LONG'?'long':'short'}">${p.side}</dd>
       <dt>Вход по рынку ≈</dt><dd>${f(p.price,1)}</dd>
@@ -616,6 +620,10 @@ function render(){
       ${(p.notes||[]).map(n=>`<div class="note">${esc(n)}</div>`).join('')}
       ${can?'':`<div class="alert">Сделка недоступна: ${esc(s.why)}</div>`}
       <button class="${p.side==='LONG'?'go-long':'go-short'}" ${can?'':'disabled'} id="openBtn">Открыть ${p.side} по рынку</button>`;
+    if(held){const tick=()=>{const left=held-Date.now(),el=$('holdLeft');
+      if(left<=0){clearInterval(HOLD_TIMER);HOLD_TIMER=null;if(el)el.textContent='0:00';$('plan').innerHTML=`<div class="muted">Время входа по сигналу фоновой проверки истекло.</div>`;return;}
+      if(el)el.textContent=Math.floor(left/6e4)+':'+String(Math.floor(left%6e4/1e3)).padStart(2,'0');};
+      tick();HOLD_TIMER=setInterval(tick,1000);}
     if(can)$('openBtn').onclick=()=>openTrade(`Открыть ${p.side} ${p.qty} BTC по рынку (≈ ${f(p.price,1)})?\nСтоп ${f(p.stop,1)}, тейк ${f(p.tp,1)}, трейлинг с ${f(p.activatePrice,1)} с отставанием ${f(p.callbackRate,1)}%.\nРиск ${usd(p.risk_usd)}, цель ${usd(p.target_usd)}.\nСчёт: ${s.mode==='LIVE'?'РЕАЛЬНЫЙ':'демо'}.`);
   } else if(p){
     const can=s.tradable;
