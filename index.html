@@ -183,7 +183,7 @@ async function gShow(){const g=$('gate');g.style.display='block';G_TR=[];
 async function gEnter(){$('gate').style.display='none';
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
-function gOk(tok){PW=tok;try{localStorage.setItem('pw',PW);}catch(e){}$('gate').classList.remove('new');gEnter();}
+function gOk(tok){PW=tok;$('gate').classList.remove('new');gEnter();}
 async function gDone(pts){
   if(pts.length<10)return;
   if(G_NEW){G_TR.push(pts);gTick();if(G_TR.length<3)return;
@@ -763,7 +763,7 @@ $('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
 $('histTf').onchange=()=>{HTF=$('histTf').value;try{localStorage.setItem('histTf',HTF);}catch(e){}renderHist();};$('histCsv').onclick=histCSV;
 for(const id of ['fIv','fSig','fVol','fN','fWin','fEq','fDD'])$(id).oninput=renderView2;$('copyBtn').onclick=copyResults;
 projectLook();
-if(IS_PHONE){if(PW)gEnter();else logout();}else if(PW)login();else logout();
+if(IS_PHONE)logout();else if(PW)login();else logout();
 </script>
 </body>
 </html>
