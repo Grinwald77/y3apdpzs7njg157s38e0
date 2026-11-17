@@ -234,7 +234,7 @@ function mEv(e){const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
   g.addEventListener('pointerdown',e=>{if(G_PTS)return;G_PTS=[[e.clientX,e.clientY,Math.round(performance.now())]];try{g.setPointerCapture(e.pointerId);}catch(x){}e.preventDefault();});
   g.addEventListener('pointermove',e=>{if(G_PTS){G_PTS.push([e.clientX,e.clientY,Math.round(performance.now())]);e.preventDefault();}});
   const up=()=>{mPerm();if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
-  g.addEventListener('pointerup',up);g.addEventListener('touchend',()=>mPerm());g.addEventListener('pointercancel',()=>{G_PTS=null;});
+  g.addEventListener('pointerup',up);g.addEventListener('touchend',()=>mPerm());g.addEventListener('click',()=>mPerm());g.addEventListener('pointercancel',()=>{G_PTS=null;});
 })();
 
 function atrArr(h,l,c,n){const tr=[h[0]-l[0]];for(let i=1;i<c.length;i++)tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
