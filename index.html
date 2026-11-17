@@ -173,7 +173,7 @@ async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
 
 // ---------- вход жестом: только телефон ----------
-const IS_PHONE=matchMedia('(pointer:coarse) and (hover:none)').matches;
+const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
 let G_NEW=false,G_TR=[],G_PTS=null;
 async function gPost(path,body){const r=await fetch(WORKER_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json().catch(()=>({}));}
 function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),220);}
