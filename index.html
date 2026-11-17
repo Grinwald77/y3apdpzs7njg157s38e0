@@ -51,8 +51,7 @@ th:first-child,td:first-child{text-align:left}
 #gate{position:fixed;inset:0;z-index:50;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
 #gband{height:22vh;background:#fff;transition:background .25s}
 #gate.s0 #gband{background:#FBE7E3}#gate.s0.tick #gband{background:#F2C4BB}
-#gate.s1 #gband{background:#E1F3E6}#gate.s1.tick #gband{background:#BFE5CB}
-#gate.s2 #gband{background:#E1ECFA}#gate.s2.tick #gband{background:#BED5F3}
+#gate.s1 #gband{background:#E1ECFA}#gate.s1.tick #gband{background:#BED5F3}
 </style>
 </head>
 <body>
@@ -174,69 +173,35 @@ async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch
 
 // ---------- вход жестом: только телефон ----------
 const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
-// Настройка: s0 розовая — жест; s1 зелёная — движение; s2 синяя — повторить жест и движение; потом вход.
-// Настроено: белый экран, жест + движение в любом порядке, без подсказок.
-let G_STEP=-1,G_FAIL=0,G_PTS=null,TICKET=null,SET={t:[],s:[]},CHK={t:null,s:null};
+// Настройка: s0 розовая — жест; s1 синяя — повторить жест для проверки; потом вход.
+// Настроено: белый экран, жест без подсказок.
+let G_STEP=-1,G_FAIL=0,G_PTS=null,SET=null;
 async function gPost(path,body){const r=await fetch(WORKER_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json().catch(()=>({}));}
 function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),250);}
-function gStep(n){G_STEP=n;const g=$('gate');g.classList.remove('s0','s1','s2');if(n>=0)g.classList.add('s'+n);}
-function gReset(){SET={t:[],s:[]};CHK={t:null,s:null};G_FAIL=0;gStep(0);}
-async function gShow(){$('gate').style.display='block';TICKET=null;SET={t:[],s:[]};CHK={t:null,s:null};
+function gStep(n){G_STEP=n;const g=$('gate');g.classList.remove('s0','s1');if(n>=0)g.classList.add('s'+n);}
+async function gShow(){$('gate').style.display='block';SET=null;G_FAIL=0;
   let set=true;try{const r=await gPost('/api/g/status');set=r.set!==false;}catch(e){}
   gStep(set?-1:0);}
 async function gEnter(){$('gate').style.display='none';
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
-function gOk(tok){PW=tok;TICKET=null;gStep(-1);gEnter();}
-function gRes(r){if(!r||!r.ok)return;if(r.token)gOk(r.token);else if(r.ticket)TICKET=r.ticket;}
-async function gCheck(){if(!CHK.t||!CHK.s)return;
-  let r={};try{r=await gPost('/api/g/setup',{traces:[SET.t[0],CHK.t],seqs:[SET.s[0],CHK.s]});}catch(e){}
-  if(r.ok&&r.token)return gOk(r.token);
-  CHK={t:null,s:null};if(++G_FAIL>=3)gReset(); // не совпало: повторить на синей; после 3 неудач — заново с розовой
-  gTick();setTimeout(gTick,350);setTimeout(gTick,700);}
+function gOk(tok){PW=tok;gStep(-1);gEnter();}
 function gLen(p){let l=0;for(let i=1;i<p.length;i++)l+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]);return l;}
 async function gDone(pts){
   if(pts.length<10||gLen(pts)<80)return;
-  if(G_STEP===0){SET.t=[pts];gTick();setTimeout(()=>gStep(1),300);return;}
-  if(G_STEP===2){if(CHK.t)return;CHK.t=pts;gTick();return gCheck();}
-  if(G_STEP!==-1)return;
-  let r={};try{r=await gPost('/api/g/try',{trace:pts,ticket:TICKET});}catch(e){}
-  gRes(r);
-}
-async function mDone(seq){
-  if($('gate').style.display!=='block'||seq.length<2)return;
-  if(G_STEP===1){SET.s=[seq];gTick();setTimeout(()=>gStep(2),300);return;}
-  if(G_STEP===2){if(CHK.s)return;CHK.s=seq;gTick();return gCheck();}
-  if(G_STEP!==-1)return;
-  let r={};try{r=await gPost('/api/g/mtry',{seq,ticket:TICKET});}catch(e){}
-  gRes(r);
-}
-// ---------- вращение телефона: наклон вперёд/назад (F/B), влево/вправо (L/R), переворот экраном вниз (X) ----------
-let M_ON=false,M_G=null,M_BASE=null,M_EXC=null,M_SEQ='',M_AT=0;
-function mStart(){if(M_ON)return;M_ON=true;window.addEventListener('devicemotion',mEv);
-  setInterval(()=>{if(M_SEQ&&!M_EXC&&Date.now()-M_AT>1500){const s=M_SEQ;M_SEQ='';M_BASE=null;mDone(s);}},300);}
-function mPerm(){if(M_ON)return;const D=window.DeviceMotionEvent;
-  if(D&&typeof D.requestPermission==='function')D.requestPermission().then(x=>{if(x==='granted')mStart();}).catch(()=>{});
-  else if(D)mStart();}
-function mEv(e){const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
-  if(G_PTS){M_BASE=null;M_EXC=null;return;}
-  const n=Math.hypot(a.x,a.y,a.z);if(!n)return;const v=[a.x/n,a.y/n,a.z/n];
-  M_G=M_G?M_G.map((q,i)=>q*0.8+v[i]*0.2):v;
-  if(!M_BASE){M_BASE=M_G.slice();return;}
-  const dot=M_G[0]*M_BASE[0]+M_G[1]*M_BASE[1]+M_G[2]*M_BASE[2];
-  if(!M_EXC){if(dot<0.82)M_EXC={x:0,y:0,flip:false};else return;}
-  const dx=M_G[0]-M_BASE[0],dy=M_G[1]-M_BASE[1];
-  if(Math.abs(dx)>Math.abs(M_EXC.x))M_EXC.x=dx;if(Math.abs(dy)>Math.abs(M_EXC.y))M_EXC.y=dy;
-  if(dot<-0.5)M_EXC.flip=true;
-  if(dot>0.966){const x=M_EXC;M_EXC=null;
-    const t=x.flip?'X':Math.abs(x.x)>=Math.abs(x.y)?(x.x<0?'L':'R'):(x.y<0?'F':'B');
-    if(M_SEQ.length<8)M_SEQ+=t;M_AT=Date.now();if(G_STEP===1||G_STEP===2)gTick();}
+  if(G_STEP===0){SET=pts;gTick();setTimeout(()=>gStep(1),300);return;}
+  if(G_STEP===1){gTick();let r={};try{r=await gPost('/api/g/setup',{traces:[SET,pts]});}catch(e){}
+    if(r.ok&&r.token)return gOk(r.token);
+    if(++G_FAIL>=3){SET=null;G_FAIL=0;gStep(0);} // повтор не совпал: ещё раз на синей; после 3 неудач — заново с розовой
+    setTimeout(gTick,350);setTimeout(gTick,700);setTimeout(gTick,1050);return;}
+  let r={};try{r=await gPost('/api/g/try',{trace:pts});}catch(e){}
+  if(r.ok&&r.token)gOk(r.token);
 }
 (()=>{const g=$('gate');
   g.addEventListener('pointerdown',e=>{if(G_PTS)return;G_PTS=[[e.clientX,e.clientY,Math.round(performance.now())]];try{g.setPointerCapture(e.pointerId);}catch(x){}e.preventDefault();});
   g.addEventListener('pointermove',e=>{if(G_PTS){G_PTS.push([e.clientX,e.clientY,Math.round(performance.now())]);e.preventDefault();}});
-  const up=()=>{mPerm();if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
-  g.addEventListener('pointerup',up);g.addEventListener('touchend',()=>mPerm());g.addEventListener('click',()=>mPerm());g.addEventListener('pointercancel',()=>{G_PTS=null;});
+  const up=()=>{if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
+  g.addEventListener('pointerup',up);g.addEventListener('pointercancel',()=>{G_PTS=null;});
 })();
 
 function atrArr(h,l,c,n){const tr=[h[0]-l[0]];for(let i=1;i<c.length;i++)tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
