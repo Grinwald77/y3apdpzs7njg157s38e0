@@ -50,8 +50,9 @@ th:first-child,td:first-child{text-align:left}
 .fl input{width:90px}
 #gate{position:fixed;inset:0;z-index:50;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
 #gband{height:22vh;background:#fff;transition:background .25s}
-#gate.new #gband{background:#FBE7E3}
-#gate.new.tick #gband{background:#F5D3CC}
+#gate.s0 #gband{background:#FBE7E3}#gate.s0.tick #gband{background:#F2C4BB}
+#gate.s1 #gband{background:#E1F3E6}#gate.s1.tick #gband{background:#BFE5CB}
+#gate.s2 #gband{background:#E1ECFA}#gate.s2.tick #gband{background:#BED5F3}
 </style>
 </head>
 <body>
@@ -173,35 +174,39 @@ async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch
 
 // ---------- вход жестом: только телефон ----------
 const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
-let G_NEW=false,M_NEW=false,G_TR=[],G_PTS=null,TICKET=null,M_TR=[];
+// Настройка: s0 розовая — жест; s1 зелёная — движение; s2 синяя — повторить жест и движение; потом вход.
+// Настроено: белый экран, жест + движение в любом порядке, без подсказок.
+let G_STEP=-1,G_PTS=null,TICKET=null,SET={t:[],s:[]},CHK={t:null,s:null};
 async function gPost(path,body){const r=await fetch(WORKER_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json().catch(()=>({}));}
-function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),220);}
-function gTwice(){setTimeout(gTick,300);setTimeout(gTick,600);}
-function gPaint(){$('gate').classList.toggle('new',G_NEW||M_NEW);}
-async function gShow(){const g=$('gate');g.style.display='block';G_TR=[];M_TR=[];TICKET=null;
-  try{const r=await gPost('/api/g/status');G_NEW=r.set===false;M_NEW=r.motion===false;}catch(e){G_NEW=M_NEW=false;}
-  gPaint();}
+function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),250);}
+function gStep(n){G_STEP=n;const g=$('gate');g.classList.remove('s0','s1','s2');if(n>=0)g.classList.add('s'+n);}
+function gReset(){SET={t:[],s:[]};CHK={t:null,s:null};gStep(0);}
+async function gShow(){$('gate').style.display='block';TICKET=null;SET={t:[],s:[]};CHK={t:null,s:null};
+  let set=true;try{const r=await gPost('/api/g/status');set=r.set!==false;}catch(e){}
+  gStep(set?-1:0);}
 async function gEnter(){$('gate').style.display='none';
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
-function gOk(tok){PW=tok;TICKET=null;G_NEW=M_NEW=false;gPaint();gEnter();}
-// ответ сервера на любой шаг: токен — входим; билет — ждём второй шаг
-function gRes(r){if(!r||!r.ok)return false;if(r.token){gOk(r.token);return true;}if(r.ticket){TICKET=r.ticket;}return true;}
+function gOk(tok){PW=tok;TICKET=null;gStep(-1);gEnter();}
+function gRes(r){if(!r||!r.ok)return;if(r.token)gOk(r.token);else if(r.ticket)TICKET=r.ticket;}
+async function gCheck(){if(!CHK.t||!CHK.s)return;
+  let r={};try{r=await gPost('/api/g/setup',{traces:[SET.t[0],CHK.t],seqs:[SET.s[0],CHK.s]});}catch(e){}
+  if(r.ok&&r.token)return gOk(r.token);
+  gReset();gTick();setTimeout(gTick,350);setTimeout(gTick,700);} // не совпало — заново с розовой
+function gLen(p){let l=0;for(let i=1;i<p.length;i++)l+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]);return l;}
 async function gDone(pts){
-  if(pts.length<10)return;
-  if(G_NEW){G_TR.push(pts);gTick();if(G_TR.length<3)return;
-    const tr=G_TR;G_TR=[];let r={};try{r=await gPost('/api/g/enroll',{traces:tr});}catch(e){}
-    if(gRes(r)){G_NEW=false;gPaint();return;}
-    gTwice();return;}
+  if(pts.length<10||gLen(pts)<80)return;
+  if(G_STEP===0){SET.t=[pts];gTick();setTimeout(()=>gStep(1),300);return;}
+  if(G_STEP===2){if(CHK.t)return;CHK.t=pts;gTick();return gCheck();}
+  if(G_STEP!==-1)return;
   let r={};try{r=await gPost('/api/g/try',{trace:pts,ticket:TICKET});}catch(e){}
-  if(gRes(r)&&M_NEW)gTick(); // жест верный — теперь задать вращение
+  gRes(r);
 }
 async function mDone(seq){
   if($('gate').style.display!=='block')return;
-  if(M_NEW){if(!TICKET||G_NEW)return; // задать вращение можно только после верного жеста
-    M_TR.push(seq);gTwice();if(M_TR.length<2)return;
-    const sq=M_TR;M_TR=[];let r={};try{r=await gPost('/api/g/menroll',{seqs:sq,ticket:TICKET});}catch(e){}
-    if(!gRes(r)){gTwice();setTimeout(gTwice,700);}return;}
+  if(G_STEP===1){SET.s=[seq];gTick();setTimeout(()=>gStep(2),300);return;}
+  if(G_STEP===2){if(CHK.s)return;CHK.s=seq;gTick();return gCheck();}
+  if(G_STEP!==-1)return;
   let r={};try{r=await gPost('/api/g/mtry',{seq,ticket:TICKET});}catch(e){}
   gRes(r);
 }
@@ -223,7 +228,7 @@ function mEv(e){const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
   if(dot<-0.5)M_EXC.flip=true;
   if(dot>0.966){const x=M_EXC;M_EXC=null;
     const t=x.flip?'X':Math.abs(x.x)>=Math.abs(x.y)?(x.x<0?'L':'R'):(x.y<0?'F':'B');
-    if(M_SEQ.length<8)M_SEQ+=t;M_AT=Date.now();if(M_NEW&&TICKET&&!G_NEW)gTick();}
+    if(M_SEQ.length<8)M_SEQ+=t;M_AT=Date.now();}
 }
 (()=>{const g=$('gate');
   g.addEventListener('pointerdown',e=>{if(G_PTS)return;G_PTS=[[e.clientX,e.clientY,Math.round(performance.now())]];try{g.setPointerCapture(e.pointerId);}catch(x){}e.preventDefault();});
