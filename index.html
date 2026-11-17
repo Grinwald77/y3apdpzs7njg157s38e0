@@ -48,6 +48,11 @@ th:first-child,td:first-child{text-align:left}
 .fl label{font-size:12.5px;color:var(--muted)}
 .fl select,.fl input{font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
 .fl input{width:90px}
+#gate{position:fixed;inset:0;z-index:50;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
+#gband{height:22vh;background:#F2F4F6;transition:background .25s}
+#gate.new #gband{background:#FBE7E3}
+#gate.tick #gband{background:#E4E8EC}
+#gate.new.tick #gband{background:#F5D3CC}
 </style>
 </head>
 <body>
@@ -65,6 +70,7 @@ th:first-child,td:first-child{text-align:left}
   <span class="muted" id="hdr"></span>
 </header>
 <div id="err" class="card alert" style="margin-bottom:14px"></div>
+<section id="gate" style="display:none"><div id="gband"></div></section>
 <section id="login" dir="rtl" style="display:none;max-width:340px;margin:18vh auto 0;text-align:center">
   <div style="font-size:44px;font-weight:800;letter-spacing:-.01em;margin-bottom:22px">אור השפע</div>
   <input id="pw" type="password" autocomplete="current-password" placeholder="סיסמה" style="font:inherit;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);text-align:center">
@@ -159,12 +165,40 @@ async function gather(){
   return d;
 }
 function logout(msg){PW='';try{localStorage.removeItem('pw');}catch(e){}clearInterval(timer);clearInterval(HTIMER);
-  $('app').style.display='none';$('top').style.display='none';$('login').style.display='block';projectLook();
+  $('app').style.display='none';$('top').style.display='none';projectLook();
+  if(IS_PHONE)gShow();else $('login').style.display='block';
   $('err').style.display=msg?'block':'none';$('err').textContent=msg||'';}
 async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch(e){}
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
 
+// ---------- вход жестом: только телефон ----------
+const IS_PHONE=matchMedia('(pointer:coarse) and (hover:none)').matches;
+let G_NEW=false,G_TR=[],G_PTS=null;
+async function gPost(path,body){const r=await fetch(WORKER_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json().catch(()=>({}));}
+function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),220);}
+async function gShow(){const g=$('gate');g.style.display='block';G_TR=[];
+  try{const r=await gPost('/api/g/status');G_NEW=r.set===false;}catch(e){G_NEW=false;}
+  g.classList.toggle('new',G_NEW);}
+async function gEnter(){$('gate').style.display='none';
+  try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
+    history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
+function gOk(tok){PW=tok;try{localStorage.setItem('pw',PW);}catch(e){}$('gate').classList.remove('new');gEnter();}
+async function gDone(pts){
+  if(pts.length<10)return;
+  if(G_NEW){G_TR.push(pts);gTick();if(G_TR.length<3)return;
+    const tr=G_TR;G_TR=[];let r={};try{r=await gPost('/api/g/enroll',{traces:tr});}catch(e){}
+    if(r.ok)return gOk(r.token);
+    setTimeout(gTick,300);setTimeout(gTick,600);return;}
+  let r={};try{r=await gPost('/api/g/try',{trace:pts});}catch(e){}
+  if(r.ok)gOk(r.token);
+}
+(()=>{const g=$('gate');
+  g.addEventListener('pointerdown',e=>{if(G_PTS)return;G_PTS=[[e.clientX,e.clientY,Math.round(performance.now())]];try{g.setPointerCapture(e.pointerId);}catch(x){}e.preventDefault();});
+  g.addEventListener('pointermove',e=>{if(G_PTS){G_PTS.push([e.clientX,e.clientY,Math.round(performance.now())]);e.preventDefault();}});
+  const up=()=>{if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
+  g.addEventListener('pointerup',up);g.addEventListener('pointercancel',()=>{G_PTS=null;});
+})();
 
 function atrArr(h,l,c,n){const tr=[h[0]-l[0]];for(let i=1;i<c.length;i++)tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
   let a=tr.slice(1,n+1).reduce((x,y)=>x+y,0)/n;const o=Array(n).fill(null).concat([a]);for(const x of tr.slice(n+1)){a=(a*(n-1)+x)/n;o.push(a);}return o;}
@@ -729,7 +763,7 @@ $('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
 $('histTf').onchange=()=>{HTF=$('histTf').value;try{localStorage.setItem('histTf',HTF);}catch(e){}renderHist();};$('histCsv').onclick=histCSV;
 for(const id of ['fIv','fSig','fVol','fN','fWin','fEq','fDD'])$(id).oninput=renderView2;$('copyBtn').onclick=copyResults;
 projectLook();
-if(PW)login();else logout();
+if(IS_PHONE){if(PW)gEnter();else logout();}else if(PW)login();else logout();
 </script>
 </body>
 </html>
