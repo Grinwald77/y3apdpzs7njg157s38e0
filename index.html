@@ -49,9 +49,8 @@ th:first-child,td:first-child{text-align:left}
 .fl select,.fl input{font:inherit;font-size:14px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
 .fl input{width:90px}
 #gate{position:fixed;inset:0;z-index:50;background:#fff;touch-action:none;-webkit-user-select:none;user-select:none}
-#gband{height:22vh;background:#F2F4F6;transition:background .25s}
+#gband{height:22vh;background:#fff;transition:background .25s}
 #gate.new #gband{background:#FBE7E3}
-#gate.tick #gband{background:#E4E8EC}
 #gate.new.tick #gband{background:#F5D3CC}
 </style>
 </head>
@@ -174,30 +173,63 @@ async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch
 
 // ---------- вход жестом: только телефон ----------
 const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
-let G_NEW=false,G_TR=[],G_PTS=null;
+let G_NEW=false,M_NEW=false,G_TR=[],G_PTS=null,TICKET=null,M_TR=[];
 async function gPost(path,body){const r=await fetch(WORKER_URL+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});return r.json().catch(()=>({}));}
 function gTick(){const g=$('gate');g.classList.add('tick');setTimeout(()=>g.classList.remove('tick'),220);}
-async function gShow(){const g=$('gate');g.style.display='block';G_TR=[];
-  try{const r=await gPost('/api/g/status');G_NEW=r.set===false;}catch(e){G_NEW=false;}
-  g.classList.toggle('new',G_NEW);}
+function gTwice(){setTimeout(gTick,300);setTimeout(gTick,600);}
+function gPaint(){$('gate').classList.toggle('new',G_NEW||M_NEW);}
+async function gShow(){const g=$('gate');g.style.display='block';G_TR=[];M_TR=[];TICKET=null;
+  try{const r=await gPost('/api/g/status');G_NEW=r.set===false;M_NEW=r.motion===false;}catch(e){G_NEW=M_NEW=false;}
+  gPaint();}
 async function gEnter(){$('gate').style.display='none';
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
-function gOk(tok){PW=tok;$('gate').classList.remove('new');gEnter();}
+function gOk(tok){PW=tok;TICKET=null;G_NEW=M_NEW=false;gPaint();gEnter();}
+// ответ сервера на любой шаг: токен — входим; билет — ждём второй шаг
+function gRes(r){if(!r||!r.ok)return false;if(r.token){gOk(r.token);return true;}if(r.ticket){TICKET=r.ticket;}return true;}
 async function gDone(pts){
   if(pts.length<10)return;
   if(G_NEW){G_TR.push(pts);gTick();if(G_TR.length<3)return;
     const tr=G_TR;G_TR=[];let r={};try{r=await gPost('/api/g/enroll',{traces:tr});}catch(e){}
-    if(r.ok)return gOk(r.token);
-    setTimeout(gTick,300);setTimeout(gTick,600);return;}
-  let r={};try{r=await gPost('/api/g/try',{trace:pts});}catch(e){}
-  if(r.ok)gOk(r.token);
+    if(gRes(r)){G_NEW=false;gPaint();return;}
+    gTwice();return;}
+  let r={};try{r=await gPost('/api/g/try',{trace:pts,ticket:TICKET});}catch(e){}
+  if(gRes(r)&&M_NEW)gTick(); // жест верный — теперь задать вращение
+}
+async function mDone(seq){
+  if($('gate').style.display!=='block')return;
+  if(M_NEW){if(!TICKET||G_NEW)return; // задать вращение можно только после верного жеста
+    M_TR.push(seq);gTwice();if(M_TR.length<2)return;
+    const sq=M_TR;M_TR=[];let r={};try{r=await gPost('/api/g/menroll',{seqs:sq,ticket:TICKET});}catch(e){}
+    if(!gRes(r)){gTwice();setTimeout(gTwice,700);}return;}
+  let r={};try{r=await gPost('/api/g/mtry',{seq,ticket:TICKET});}catch(e){}
+  gRes(r);
+}
+// ---------- вращение телефона: наклон вперёд/назад (F/B), влево/вправо (L/R), переворот экраном вниз (X) ----------
+let M_ON=false,M_G=null,M_BASE=null,M_EXC=null,M_SEQ='',M_AT=0;
+function mStart(){if(M_ON)return;M_ON=true;window.addEventListener('devicemotion',mEv);
+  setInterval(()=>{if(M_SEQ&&!M_EXC&&Date.now()-M_AT>1500){const s=M_SEQ;M_SEQ='';M_BASE=null;mDone(s);}},300);}
+function mPerm(){if(M_ON)return;const D=window.DeviceMotionEvent;
+  if(D&&typeof D.requestPermission==='function')D.requestPermission().then(x=>{if(x==='granted')mStart();}).catch(()=>{});
+  else if(D)mStart();}
+function mEv(e){const a=e.accelerationIncludingGravity;if(!a||a.x==null)return;
+  const n=Math.hypot(a.x,a.y,a.z);if(!n)return;const v=[a.x/n,a.y/n,a.z/n];
+  M_G=M_G?M_G.map((q,i)=>q*0.8+v[i]*0.2):v;
+  if(!M_BASE){M_BASE=M_G.slice();return;}
+  const dot=M_G[0]*M_BASE[0]+M_G[1]*M_BASE[1]+M_G[2]*M_BASE[2];
+  if(!M_EXC){if(dot<0.82)M_EXC={x:0,y:0,flip:false};else return;}
+  const dx=M_G[0]-M_BASE[0],dy=M_G[1]-M_BASE[1];
+  if(Math.abs(dx)>Math.abs(M_EXC.x))M_EXC.x=dx;if(Math.abs(dy)>Math.abs(M_EXC.y))M_EXC.y=dy;
+  if(dot<-0.5)M_EXC.flip=true;
+  if(dot>0.966){const x=M_EXC;M_EXC=null;
+    const t=x.flip?'X':Math.abs(x.x)>=Math.abs(x.y)?(x.x<0?'L':'R'):(x.y<0?'F':'B');
+    if(M_SEQ.length<8)M_SEQ+=t;M_AT=Date.now();if(M_NEW&&TICKET&&!G_NEW)gTick();}
 }
 (()=>{const g=$('gate');
   g.addEventListener('pointerdown',e=>{if(G_PTS)return;G_PTS=[[e.clientX,e.clientY,Math.round(performance.now())]];try{g.setPointerCapture(e.pointerId);}catch(x){}e.preventDefault();});
   g.addEventListener('pointermove',e=>{if(G_PTS){G_PTS.push([e.clientX,e.clientY,Math.round(performance.now())]);e.preventDefault();}});
-  const up=()=>{if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
-  g.addEventListener('pointerup',up);g.addEventListener('pointercancel',()=>{G_PTS=null;});
+  const up=()=>{mPerm();if(!G_PTS)return;const p=G_PTS;G_PTS=null;gDone(p);};
+  g.addEventListener('pointerup',up);g.addEventListener('touchend',()=>mPerm());g.addEventListener('pointercancel',()=>{G_PTS=null;});
 })();
 
 function atrArr(h,l,c,n){const tr=[h[0]-l[0]];for(let i=1;i<c.length;i++)tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
