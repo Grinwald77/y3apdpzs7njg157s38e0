@@ -165,13 +165,14 @@ async function gather(){
 }
 function logout(msg){PW='';try{localStorage.removeItem('pw');}catch(e){}clearInterval(timer);clearInterval(HTIMER);
   $('app').style.display='none';$('top').style.display='none';projectLook();
-  if(IS_PHONE)gShow();else $('login').style.display='block';
+  if(IS_PHONE&&G_GATE)gShow();else $('login').style.display='block';
   $('err').style.display=msg?'block':'none';$('err').textContent=msg||'';}
 async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch(e){}
   try{await load(true);$('login').style.display='none';$('top').style.display='';$('app').style.display='';clearInterval(timer);timer=setInterval(load,15000);
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
 
 // ---------- вход жестом: только телефон ----------
+const G_GATE=false; // вход жестом пока выключен: телефон входит по обычному паролю (true — вернуть жест)
 const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
 // Настройка: s0 розовая — жест; s1 синяя — повторить жест для проверки; потом вход.
 // Настроено: белый экран, жест без подсказок.
@@ -767,7 +768,7 @@ $('sysSel').onchange=sysShow;sysShow();$('jrClear').onclick=clearJournal;
 $('histTf').onchange=()=>{HTF=$('histTf').value;try{localStorage.setItem('histTf',HTF);}catch(e){}renderHist();};$('histCsv').onclick=histCSV;
 for(const id of ['fIv','fSig','fVol','fN','fWin','fEq','fDD'])$(id).oninput=renderView2;$('copyBtn').onclick=copyResults;
 projectLook();
-if(IS_PHONE)logout();else if(PW)login();else logout();
+if(IS_PHONE&&G_GATE)logout();else if(PW)login();else logout();
 </script>
 </body>
 </html>
