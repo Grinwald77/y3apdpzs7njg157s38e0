@@ -172,7 +172,7 @@ async function login(){PW=$('pw').value;try{localStorage.setItem('pw',PW);}catch
     history24();clearInterval(HTIMER);HTIMER=setInterval(history24,5*60000);}catch(e){}}
 
 // ---------- вход жестом: только телефон ----------
-const G_GATE=false; // вход жестом пока выключен: телефон входит по обычному паролю (true — вернуть жест)
+const G_GATE=true; // вход жестом с телефона (false — телефон входит по обычному паролю)
 const IS_PHONE=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>0&&Math.min(screen.width,screen.height)<820)||/Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
 // Настройка: s0 розовая — жест; s1 синяя — повторить жест для проверки; потом вход.
 // Настроено: белый экран, жест без подсказок.
